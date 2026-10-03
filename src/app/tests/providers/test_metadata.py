@@ -425,6 +425,23 @@ class Metadata(TestCase):
         self.assertEqual(response["details"]["country"], None)
         self.assertEqual(response["details"]["languages"], None)
 
+    def test_get_steam_store_links(self):
+        """Test extracting web and protocol links from IGDB Steam data."""
+        response = {
+            "external_games": [
+                {"uid": "292030", "external_game_source": 1},
+                {"uid": "other", "external_game_source": 5},
+            ],
+        }
+        self.assertEqual(
+            igdb.get_steam_store_links(response),
+            {
+                "Steam": "https://store.steampowered.com/app/292030/",
+            },
+        )
+        self.assertEqual(igdb.get_steam_store_links({"external_games": []}), {})
+        self.assertEqual(igdb.get_steam_store_links({}), {})
+
     def test_games(self):
         """Test the metadata method for games."""
         response = igdb.game("1942")
