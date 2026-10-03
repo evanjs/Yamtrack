@@ -240,6 +240,40 @@
       </div>
     </div>
 
+    {% if media.screenshots %}
+      <section class="mb-12" aria-label="Gameplay screenshots">
+        <h2 class="text-xl font-bold mb-4">Gameplay screenshots</h2>
+        <div x-data="{ index: 0, count: {{ media.screenshots|length }} }"
+             @keydown.arrow-left.window="index = (index - 1 + count) % count"
+             @keydown.arrow-right.window="index = (index + 1) % count"
+             class="relative mx-auto max-w-4xl overflow-hidden rounded-lg bg-[#2a2f35]">
+          <div class="relative" style="aspect-ratio: 16 / 9;">
+            {% for screenshot in media.screenshots %}
+              <img x-show="index === {{ forloop.counter0 }}"
+                   src="{{ screenshot }}"
+                   alt="{{ media.title }} gameplay screenshot {{ forloop.counter }} of {{ media.screenshots|length }}"
+                   class="absolute inset-0 h-full w-full object-contain"
+                   {% if not forloop.first %}loading="lazy"{% endif %}>
+            {% endfor %}
+          </div>
+          {% if media.screenshots|length > 1 %}
+            <button type="button"
+                    aria-label="Previous screenshot"
+                    @click="index = (index - 1 + count) % count"
+                    class="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 px-3 py-2 text-white hover:bg-black/80">&#8249;</button>
+            <button type="button"
+                    aria-label="Next screenshot"
+                    @click="index = (index + 1) % count"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 px-3 py-2 text-white hover:bg-black/80">&#8250;</button>
+            <div class="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-sm text-white"
+                 aria-live="polite">
+              <span x-text="index + 1"></span> / {{ media.screenshots|length }}
+            </div>
+          {% endif %}
+        </div>
+      </section>
+    {% endif %}
+
     {# Bottom section #}
     <div class="flex flex-col md:flex-row gap-12 md:gap-10">
       {# Sidebar #}
