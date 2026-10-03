@@ -284,7 +284,8 @@ def game(media_id):
             "standalone_expansions.name,standalone_expansions.cover.image_id,"
             "expanded_games.name,expanded_games.cover.image_id,"
             "similar_games.name,similar_games.cover.image_id,"
-            "dlcs.name,dlcs.cover.image_id;"
+            "dlcs.name,dlcs.cover.image_id,"
+            "external_games.uid,external_games.external_game_source;"
             f"where id = {media_id};"
             "};"
             'query game_time_to_beats "TTBData" {'
@@ -370,8 +371,21 @@ def game(media_id):
             },
             "time_to_beat": time_to_beat,
         }
+        external_links = get_steam_store_links(game_response)
+        if external_links:
+            data["external_links"] = external_links
         cache.set(cache_key, data)
     return data
+
+
+def get_steam_store_links(response):
+    """Return the Steam Store link from IGDB external games, if available."""
+    for external_game in response.get("external_games", []):
+        if external_game.get("external_game_source") == ExternalGameSource.STEAM:
+            uid = external_game.get("uid")
+            if uid:
+                return {"Steam": f"https://store.steampowered.com/app/{uid}/"}
+    return {}
 
 
 def get_image_url(response):
