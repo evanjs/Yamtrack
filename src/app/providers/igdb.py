@@ -379,12 +379,18 @@ def game(media_id):
 
 
 def get_steam_store_links(response):
-    """Return the Steam Store link from IGDB external games, if available."""
+    """Return Steam Store and PCGamingWiki links when a Steam app ID exists."""
     for external_game in response.get("external_games", []):
         if external_game.get("external_game_source") == ExternalGameSource.STEAM:
             uid = external_game.get("uid")
             if uid:
-                return {"Steam": f"https://store.steampowered.com/app/{uid}/"}
+                return {
+                    "Steam": f"https://store.steampowered.com/app/{uid}/",
+                    "PCGamingWiki": (
+                        "https://www.pcgamingwiki.com/api/appid.php?appid="
+                        f"{uid}"
+                    ),
+                }
     return {}
 
 
