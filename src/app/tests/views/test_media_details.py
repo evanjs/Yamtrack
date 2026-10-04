@@ -34,6 +34,10 @@ class MediaDetailsViewTests(TestCase):
             "image": "http://example.com/image.jpg",
             "overview": "Test overview",
             "release_date": "2023-01-01",
+            "screenshots": [
+                "https://images.igdb.com/igdb/image/upload/t_screenshot_big/one.jpg",
+                "https://images.igdb.com/igdb/image/upload/t_screenshot_big/two.jpg",
+            ],
         }
 
         response = self.client.get(
@@ -53,6 +57,9 @@ class MediaDetailsViewTests(TestCase):
 
         self.assertIn("media", response.context)
         self.assertEqual(response.context["media"]["title"], "Test Movie")
+        self.assertContains(response, "Gameplay screenshots")
+        self.assertContains(response, 'aria-label="Next screenshot"')
+        self.assertContains(response, "t_screenshot_big/one.jpg")
 
         mock_get_metadata.assert_called_once_with(
             MediaTypes.MOVIE.value,

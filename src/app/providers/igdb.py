@@ -274,7 +274,7 @@ def game(media_id):
         url = f"{base_url}/multiquery"
         multiquery = (
             'query games "GameData" {'
-            "fields name,cover.image_id,artworks.image_id,"
+            "fields name,cover.image_id,screenshots.image_id,"
             "url,summary,game_type,first_release_date,total_rating,total_rating_count,"
             "genres.name,themes.name,platforms.name,involved_companies.company.name,"
             "parent_game.name,parent_game.cover.image_id,"
@@ -338,6 +338,12 @@ def game(media_id):
             ttb_data = {k: v for k, v in entry.items() if k != "id" and v is not None}
             time_to_beat = ttb_data or None
 
+        igdb_screenshots = get_screenshot_urls(game_response)
+        steam_app_id = get_steam_app_id(game_response)
+        steam_screenshots = (
+            get_steam_screenshot_urls(steam_app_id) if steam_app_id else []
+        )
+
         data = {
             "media_id": game_response["id"],
             "source": Sources.IGDB.value,
@@ -346,6 +352,7 @@ def game(media_id):
             "title": game_response["name"],
             "max_progress": None,
             "image": get_image_url(game_response),
+            "screenshots": steam_screenshots or igdb_screenshots,
             "synopsis": game_response.get("summary", "No synopsis available."),
             "genres": get_list(game_response, "genres"),
             "score": get_score(game_response),
@@ -378,20 +385,66 @@ def game(media_id):
     return data
 
 
-def get_steam_store_links(response):
-    """Return Steam Store and PCGamingWiki links when a Steam app ID exists."""
+def get_steam_app_id(response):
+    """Return the Steam app ID from IGDB external-game data, if available."""
     for external_game in response.get("external_games", []):
         if external_game.get("external_game_source") == ExternalGameSource.STEAM:
             uid = external_game.get("uid")
             if uid:
-                return {
-                    "Steam": f"https://store.steampowered.com/app/{uid}/",
-                    "PCGamingWiki": (
-                        "https://www.pcgamingwiki.com/api/appid.php?appid="
-                        f"{uid}"
-                    ),
-                }
+                return str(uid)
+    return None
+
+
+def get_steam_store_links(response):
+    """Return Steam Store and PCGamingWiki links when a Steam app ID exists."""
+    uid = get_steam_app_id(response)
+    if uid:
+        return {
+            "Steam": f"https://store.steampowered.com/app/{uid}/",
+            "PCGamingWiki": (
+                "https://www.pcgamingwiki.com/api/appid.php?appid="
+                f"{uid}"
+            ),
+        }
     return {}
+
+
+def get_steam_screenshot_urls(app_id):
+    """Return cached Steam Store screenshots for an app, or an empty list."""
+    cache_key = f"steam_game_screenshots_{app_id}"
+    screenshots = cache.get(cache_key)
+    if screenshots is None:
+        try:
+            response = services.api_request(
+                "steam",
+                "GET",
+                "https://store.steampowered.com/api/appdetails",
+                params={"appids": app_id},
+            )
+            app_data = (
+                response.get(str(app_id), {}) if isinstance(response, dict) else {}
+            )
+            screenshots = []
+            if isinstance(app_data, dict) and app_data.get("success"):
+                screenshots = [
+                    screenshot["path_full"]
+                    for screenshot in app_data.get("data", {}).get("screenshots", [])
+                    if isinstance(screenshot, dict) and screenshot.get("path_full")
+                ]
+        except requests.exceptions.RequestException:
+            logger.warning("Could not retrieve Steam screenshots for app %s", app_id)
+            screenshots = []
+        cache.set(cache_key, screenshots)
+    return screenshots
+
+
+def get_screenshot_urls(response):
+    """Return IGDB gameplay screenshot URLs, excluding entries without images."""
+    return [
+        f"https://images.igdb.com/igdb/image/upload/t_screenshot_big/{screenshot['image_id']}.jpg"
+        for screenshot in response.get("screenshots", [])
+        if screenshot.get("image_id")
+    ]
 
 
 def get_image_url(response):

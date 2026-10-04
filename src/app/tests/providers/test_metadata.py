@@ -445,6 +445,62 @@ class Metadata(TestCase):
         self.assertEqual(igdb.get_steam_store_links({"external_games": []}), {})
         self.assertEqual(igdb.get_steam_store_links({}), {})
 
+    def test_get_steam_app_id(self):
+        """Test extracting the Steam app ID from IGDB external-game data."""
+        response = {
+            "external_games": [
+                {"uid": "292030", "external_game_source": 1},
+            ],
+        }
+        self.assertEqual(igdb.get_steam_app_id(response), "292030")
+        self.assertIsNone(igdb.get_steam_app_id({}))
+
+    @patch("app.providers.igdb.services.api_request")
+    def test_get_steam_screenshot_urls(self, mock_api_request):
+        """Test fetching and caching Steam Store screenshots."""
+        cache_key = "steam_game_screenshots_292030"
+        igdb.cache.delete(cache_key)
+        mock_api_request.return_value = {
+            "292030": {
+                "success": True,
+                "data": {
+                    "screenshots": [
+                        {"path_full": "https://cdn.example/screenshot-1.jpg"},
+                        {},
+                    ],
+                },
+            },
+        }
+
+        self.assertEqual(
+            igdb.get_steam_screenshot_urls("292030"),
+            ["https://cdn.example/screenshot-1.jpg"],
+        )
+        self.assertEqual(
+            igdb.get_steam_screenshot_urls("292030"),
+            ["https://cdn.example/screenshot-1.jpg"],
+        )
+        mock_api_request.assert_called_once_with(
+            "steam",
+            "GET",
+            "https://store.steampowered.com/api/appdetails",
+            params={"appids": "292030"},
+        )
+        igdb.cache.delete(cache_key)
+
+    def test_get_screenshot_urls(self):
+        """Test extracting IGDB screenshot image URLs."""
+        self.assertEqual(
+            igdb.get_screenshot_urls(
+                {"screenshots": [{"image_id": "abc"}, {}, {"image_id": "def"}]},
+            ),
+            [
+                "https://images.igdb.com/igdb/image/upload/t_screenshot_big/abc.jpg",
+                "https://images.igdb.com/igdb/image/upload/t_screenshot_big/def.jpg",
+            ],
+        )
+        self.assertEqual(igdb.get_screenshot_urls({}), [])
+
     def test_games(self):
         """Test the metadata method for games."""
         response = igdb.game("1942")
