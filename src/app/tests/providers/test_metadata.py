@@ -437,6 +437,9 @@ class Metadata(TestCase):
             igdb.get_steam_store_links(response),
             {
                 "Steam": "https://store.steampowered.com/app/292030/",
+                "PCGamingWiki": (
+                    "https://www.pcgamingwiki.com/api/appid.php?appid=292030"
+                ),
             },
         )
         self.assertEqual(igdb.get_steam_store_links({"external_games": []}), {})
