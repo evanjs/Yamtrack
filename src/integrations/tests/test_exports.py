@@ -1,12 +1,15 @@
 import csv
 from datetime import UTC, datetime
 from io import StringIO
+from unittest.mock import patch
 
+import yaml
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.test import TestCase
 from django.urls import reverse
 
+from app.metadata import store_igdb_game_taxonomies
 from app.models import (
     Anime,
     Book,
@@ -27,6 +30,22 @@ class ExportCSVTest(TestCase):
 
     def setUp(self):
         """Create necessary data for the tests."""
+        def get_media_metadata(media_type, *_args):
+            if media_type == "tv_with_seasons":
+                return {"season/1": {"episodes": [{}, {}]}}
+            return {
+                "title": "Test media",
+                "image": "https://example.com/image.jpg",
+                "max_progress": None,
+                "details": {"seasons": 1},
+            }
+
+        self.metadata_patcher = patch(
+            "app.providers.services.get_media_metadata",
+            side_effect=get_media_metadata,
+        )
+        self.mock_get_media_metadata = self.metadata_patcher.start()
+        self.addCleanup(self.metadata_patcher.stop)
         self.credentials = {"username": "test", "password": "12345"}
         self.user = get_user_model().objects.create_superuser(**self.credentials)
         self.client.login(**self.credentials)
@@ -138,6 +157,83 @@ class ExportCSVTest(TestCase):
             status=Status.IN_PROGRESS.value,
             progress=120,
             start_date=datetime(2021, 6, 1, 0, 0, tzinfo=UTC),
+        )
+
+    def test_export_share_yaml_has_typed_sections_and_tracking(self):
+        """YAML export separates media types and tracking from item identity."""
+        response = self.client.get(reverse("export_yaml"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/yaml")
+        self.assertEqual(
+            response["Content-Disposition"],
+            'attachment; filename="yamtrack_share.yaml"',
+        )
+        document = yaml.safe_load(response.content)
+
+        self.assertEqual(document["format_version"], 2)
+        self.assertEqual(len(document["movie"]), 1)
+        self.assertEqual(len(document["game"]), 1)
+        self.assertEqual(len(document["book"]), 1)
+        self.assertEqual(document["movie"][0]["item"]["title"], "Perfect Blue")
+        self.assertEqual(document["movie"][0]["tracking"]["notes"], "Nice")
+        self.assertEqual(document["movie"][0]["tracking"]["score"], 9)
+
+    def test_export_share_yaml_includes_persisted_igdb_taxonomies(self):
+        """Share YAML exports stored taxonomy IDs and labels without hydration."""
+        game_item = Item.objects.get(
+            media_id="1",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+        )
+        store_igdb_game_taxonomies(
+            game_item,
+            {
+                "genres": [{"id": 31, "name": "Adventure"}],
+                "themes": [{"id": 17, "name": "Fantasy"}],
+                "keywords": [{"id": 99, "name": "metroidvania"}],
+            },
+        )
+
+        self.mock_get_media_metadata.reset_mock()
+        response = self.client.get(reverse("export_yaml"))
+
+        document = yaml.safe_load(response.content)
+        self.assertEqual(
+            document["game"][0]["item"]["igdb"],
+            {
+                "genres": [{"id": 31, "name": "Adventure"}],
+                "themes": [{"id": 17, "name": "Fantasy"}],
+                "keywords": [{"id": 99, "name": "metroidvania"}],
+            },
+        )
+        self.mock_get_media_metadata.assert_not_called()
+
+    def test_export_share_yaml_is_scoped_to_current_user(self):
+        """Share export never includes another user's tracking data."""
+        other_user = get_user_model().objects.create_user(username="other")
+        other_item = Item.objects.create(
+            media_id="other-movie",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.MOVIE.value,
+            title="Private movie",
+        )
+        Movie.objects.bulk_create(
+            [
+                Movie(
+                    item=other_item,
+                    user=other_user,
+                    status=Status.COMPLETED.value,
+                ),
+            ],
+        )
+
+        response = self.client.get(reverse("export_yaml"))
+        document = yaml.safe_load(response.content)
+
+        self.assertNotIn(
+            "Private movie",
+            {entry["item"]["title"] for entry in document["movie"]},
         )
 
     def test_export_csv(self):

@@ -6,6 +6,7 @@ import requests
 from django.conf import settings
 
 import app
+from app.metadata import store_igdb_game_taxonomies
 from app.models import MediaTypes, Sources, Status
 from app.providers import services
 from app.providers.igdb import ExternalGameSource, external_game
@@ -187,6 +188,12 @@ class SteamImporter:
             ].get(media_id)
 
             if existing_game and self.mode == "overwrite":
+                if igdb_game.get("igdb_taxonomies") is not None:
+                    store_igdb_game_taxonomies(
+                        existing_game.item,
+                        igdb_game["igdb_taxonomies"],
+                        provider_updated_at=igdb_game.get("igdb_updated_at"),
+                    )
                 self._queue_existing_game_update(
                     existing_game,
                     playtime_forever,
@@ -214,6 +221,12 @@ class SteamImporter:
                     "image": igdb_game["image"],
                 },
             )
+            if igdb_game.get("igdb_taxonomies") is not None:
+                store_igdb_game_taxonomies(
+                    item,
+                    igdb_game["igdb_taxonomies"],
+                    provider_updated_at=igdb_game.get("igdb_updated_at"),
+                )
 
             # Determine status based on playtime
             status = self._determine_game_status(playtime_forever, playtime_2weeks)
@@ -327,6 +340,8 @@ class SteamImporter:
             "media_type": MediaTypes.GAME.value,
             "title": game_details.get("title", game_name),
             "image": game_details["image"],
+            "igdb_taxonomies": game_details.get("igdb_taxonomies"),
+            "igdb_updated_at": game_details.get("igdb_updated_at"),
         }
         logger.debug(
             "Matched Steam game %s (appid: %s) with IGDB ID %s via external_game",

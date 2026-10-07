@@ -9,6 +9,7 @@ from requests.exceptions import HTTPError
 
 from app.models import (
     Game,
+    IGDBGameMetadata,
     MediaTypes,
     Sources,
     Status,
@@ -72,7 +73,16 @@ class ImportSteam(TestCase):
         mock_external_game.side_effect = [1, 2, 3]  # IGDB game IDs for each Steam app
 
         mock_get_metadata.side_effect = [
-            {"title": "Counter-Strike 2", "image": "http://example.com/cs2.jpg"},
+            {
+                "title": "Counter-Strike 2",
+                "image": "http://example.com/cs2.jpg",
+                "igdb_taxonomies": {
+                    "genres": [{"id": 4, "name": "Shooter"}],
+                    "themes": [],
+                    "keywords": [],
+                },
+                "igdb_updated_at": None,
+            },
             {"title": "Dota 2", "image": "http://example.com/dota2.jpg"},
             {"title": "Team Fortress 2", "image": "http://example.com/tf2.jpg"},
         ]
@@ -91,6 +101,11 @@ class ImportSteam(TestCase):
         cs2_game = games.get(item__title="Counter-Strike 2")
         self.assertEqual(cs2_game.status, Status.IN_PROGRESS.value)
         self.assertEqual(cs2_game.progress, 1250)
+        taxonomy_metadata = IGDBGameMetadata.objects.get(item=cs2_game.item)
+        self.assertEqual(
+            list(taxonomy_metadata.taxonomies.values_list("name", flat=True)),
+            ["Shooter"],
+        )
 
         dota_game = games.get(item__title="Dota 2")
         self.assertEqual(dota_game.status, Status.PLANNING.value)

@@ -10,13 +10,24 @@
       {% include "app/icons/export.svg" with classes="w-6 h-6 text-indigo-400 mr-3" %}
       <h2 class="text-xl font-semibold">Export Data</h2>
     </div>
-    <p class="text-gray-400 mb-5 text-sm">Back up your data or export it for use with other services.</p>
-    <p class="text-sm text-gray-400 mb-4">Your export will include all your media items.</p>
-    <form method="get" action="{% url 'export_csv' %}">
-      {% csrf_token %}
-      <button class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm cursor-pointer">
-        Export as CSV
-      </button>
-    </form>
+    <p class="text-gray-400 mb-5 text-sm">Back up your data or export it for sharing.</p>
+    <div class="mb-5">
+      <h3 class="text-sm font-medium mb-1">Yamtrack backup</h3>
+      <p class="text-sm text-gray-400 mb-3">All media types, formatted for importing back into Yamtrack.</p>
+      <form method="get" action="{% url 'export_csv' %}">
+        <button class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm cursor-pointer">
+          Export backup CSV
+        </button>
+      </form>
+    </div>
+    <div>
+      <h3 class="text-sm font-medium mb-1">Share-friendly library</h3>
+      <p class="text-sm text-gray-400 mb-3">Games, movies, and books in separate YAML sections, with item details and your tracking information.</p>
+      <form method="get" action="{% url 'export_yaml' %}">
+        <button class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm cursor-pointer">
+          Export share YAML
+        </button>
+      </form>
+    </div>
   </div>
 {% endblock settings_content %}

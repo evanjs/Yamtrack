@@ -13,19 +13,7 @@
     {{ media_type|media_type_readable_plural }}
   </h1>
 
-  <div x-data="{ sort: '{{ current_sort }}', status: '{{ current_status }}', layout: '{{ current_layout }}', search: '{{ request.GET.search|default:'' }}', statusLabels: {
-    {% for value, label in status_choices %}
-      '{{ value }}': '{{ label }}'
-      {% if not forloop.last %},{% endif %}
-
-    {% endfor %}
-    }, sortLabels: {
-    {% for value, label in sort_choices %}
-      '{{ value }}': '{{ label }}'
-      {% if not forloop.last %},{% endif %}
-
-    {% endfor %}
-    } }">
+  <div x-data="{ sort: '{{ current_sort }}', status: '{{ current_status }}', layout: '{{ current_layout }}', search: '{{ request.GET.search|default:'' }}', statusLabels: { {% for value, label in status_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} }, sortLabels: { {% for value, label in sort_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} } }">
 
     <!-- Form to manage state -->
     <form id="filter-form" class="hidden">
@@ -45,7 +33,7 @@
                hx-get="{% url 'medialist' target_user.username media_type %}"
                hx-trigger="keyup changed delay:300ms, search"
                {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
-               hx-include="#filter-form"
+               hx-include="#filter-form,#taxonomy-filter-form"
                hx-indicator="#search-indicator">
         {% include "app/icons/magnifying-glass.svg" with classes="w-6 h-6 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" %}
         <div id="search-indicator"
@@ -53,6 +41,69 @@
           <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-500"></div>
         </div>
       </div>
+
+      {% if media_type == MediaTypes.GAME.value and has_taxonomy_options %}
+        <details class="relative">
+          <summary class="flex items-center px-4 py-2 bg-[#39404b] rounded-md hover:bg-[#454d5a] transition-colors cursor-pointer list-none">
+            IGDB facets
+          </summary>
+          <form id="taxonomy-filter-form"
+                x-data="{ activeFacet: 'genre', selectedCounts: { genre: {{ current_taxonomy_filters.genre|length }}, theme: {{ current_taxonomy_filters.theme|length }}, keyword: {{ current_taxonomy_filters.keyword|length }} } }"
+                class="absolute z-20 mt-2 p-4 w-80 max-h-[70svh] overflow-y-auto bg-[#39404b] rounded-md shadow-lg border border-gray-700"
+                hx-get="{% url 'medialist' target_user.username media_type %}"
+                hx-trigger="change"
+                {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
+                hx-include="#filter-form"
+                hx-indicator="#loading-indicator">
+            <div role="tablist" aria-label="IGDB facet types" class="flex gap-1 border-b border-gray-600">
+              {% for facet, options in taxonomy_options.items %}
+                <button type="button"
+                        role="tab"
+                        id="taxonomy-tab-{{ facet }}"
+                        aria-controls="taxonomy-panel-{{ facet }}"
+                        :aria-selected="activeFacet === '{{ facet }}'"
+                        :tabindex="activeFacet === '{{ facet }}' ? 0 : -1"
+                        @click="activeFacet = '{{ facet }}'"
+                        @keydown.right.prevent="$el.parentElement.querySelectorAll('[role=tab]')[(Array.from($el.parentElement.querySelectorAll('[role=tab]')).indexOf($el) + 1) % {{ taxonomy_options|length }}].focus()"
+                        @keydown.left.prevent="$el.parentElement.querySelectorAll('[role=tab]')[(Array.from($el.parentElement.querySelectorAll('[role=tab]')).indexOf($el) + {{ taxonomy_options|length }} - 1) % {{ taxonomy_options|length }}].focus()"
+                        class="px-2 py-2 text-sm font-medium border-b-2"
+                        :class="activeFacet === '{{ facet }}' ? 'border-indigo-400 text-white' : 'border-transparent text-gray-400 hover:text-white'">
+                  {{ facet|title }}
+                  <span class="ml-1 text-xs text-indigo-200" x-text="selectedCounts['{{ facet }}']"></span>
+                </button>
+              {% endfor %}
+            </div>
+            {% for facet, options in taxonomy_options.items %}
+              <fieldset role="tabpanel"
+                        id="taxonomy-panel-{{ facet }}"
+                        aria-labelledby="taxonomy-tab-{{ facet }}"
+                        x-show="activeFacet === '{{ facet }}'"
+                        x-data="{ needle: '' }"
+                        class="pt-3">
+                <input type="search"
+                       x-model="needle"
+                       placeholder="Find {{ facet }}..."
+                       aria-label="Find {{ facet }}"
+                       class="w-full mb-2 px-2 py-1 rounded bg-[#2a2f35] text-white text-sm">
+                <div class="max-h-80 overflow-y-auto space-y-1">
+                  {% for option in options %}
+                    <label x-show="!needle || '{{ option.name|escapejs }}'.toLowerCase().includes(needle.toLowerCase())"
+                           class="flex items-start gap-2 text-sm text-gray-200">
+                      <input type="checkbox"
+                             name="{{ facet }}"
+                             value="{{ option.provider_id }}"
+                             {% if option.selected %}checked{% endif %}
+                             @change="selectedCounts['{{ facet }}'] = $root.querySelectorAll('input[name={{ facet }}]:checked').length"
+                             class="mt-1 accent-indigo-500">
+                      <span>{{ option.name }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </fieldset>
+            {% endfor %}
+          </form>
+        </details>
+      {% endif %}
 
       <div class="flex gap-2 flex-wrap">
         <!-- Filter by Status -->
@@ -78,7 +129,7 @@
             {% for value, label in status_choices %}
               <button hx-get="{% url 'medialist' target_user.username media_type %}"
                       {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
-                      hx-include="#filter-form"
+                      hx-include="#filter-form,#taxonomy-filter-form"
                       hx-indicator="#loading-indicator"
                       class="block w-full px-4 py-2 text-left text-sm transition-colors cursor-pointer"
                       :class="status === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
@@ -111,7 +162,7 @@
             {% for value, label in sort_choices %}
               <button hx-get="{% url 'medialist' target_user.username media_type %}"
                       {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
-                      hx-include="#filter-form"
+                      hx-include="#filter-form,#taxonomy-filter-form"
                       hx-indicator="#loading-indicator"
                       class="block w-full px-4 py-2 text-left text-sm transition-colors cursor-pointer"
                       :class="sort === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
@@ -123,12 +174,12 @@
 
         <!-- Layout Toggle -->
         <div class="flex rounded-md overflow-hidden border border-gray-700">
-          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}layout=grid`"
+          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for id in current_taxonomy_filters.genre %}genre={{ id }}&{% endfor %}{% for id in current_taxonomy_filters.theme %}theme={{ id }}&{% endfor %}{% for id in current_taxonomy_filters.keyword %}keyword={{ id }}&{% endfor %}layout=grid`"
              class="p-2 cursor-pointer"
              :class="layout === 'grid' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a]'"
              title="Grid View"
              @click="layout = 'grid'">{% include "app/icons/four-square.svg" with classes="w-5 h-5" %}</a>
-          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}layout=table`"
+          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for id in current_taxonomy_filters.genre %}genre={{ id }}&{% endfor %}{% for id in current_taxonomy_filters.theme %}theme={{ id }}&{% endfor %}{% for id in current_taxonomy_filters.keyword %}keyword={{ id }}&{% endfor %}layout=table`"
              class="p-2 cursor-pointer"
              :class="layout === 'table' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a]'"
              title="Table View"

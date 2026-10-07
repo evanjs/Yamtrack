@@ -269,14 +269,21 @@ def game(media_id):
     """Return the metadata for the selected game from IGDB."""
     cache_key = f"{Sources.IGDB.value}_{MediaTypes.GAME.value}_{media_id}"
     data = cache.get(cache_key)
+    if data is not None and (
+        not isinstance(data, dict) or "igdb_taxonomies" not in data
+    ):
+        cache.delete(cache_key)
+        data = None
     if data is None:
         access_token = get_access_token()
         url = f"{base_url}/multiquery"
         multiquery = (
             'query games "GameData" {'
             "fields name,cover.image_id,screenshots.image_id,"
-            "url,summary,game_type,first_release_date,total_rating,total_rating_count,"
-            "genres.name,themes.name,platforms.name,involved_companies.company.name,"
+            "url,summary,game_type,first_release_date,updated_at,"
+            "total_rating,total_rating_count,"
+            "genres.id,genres.name,themes.id,themes.name,keywords.id,keywords.name,"
+            "platforms.name,involved_companies.company.name,"
             "parent_game.name,parent_game.cover.image_id,"
             "remasters.name,remasters.cover.image_id,"
             "remakes.name,remakes.cover.image_id,"
@@ -355,6 +362,8 @@ def game(media_id):
             "screenshots": steam_screenshots or igdb_screenshots,
             "synopsis": game_response.get("summary", "No synopsis available."),
             "genres": get_list(game_response, "genres"),
+            "igdb_taxonomies": get_igdb_taxonomies(game_response),
+            "igdb_updated_at": get_igdb_updated_at(game_response),
             "score": get_score(game_response),
             "score_count": game_response.get("total_rating_count"),
             "details": {
@@ -382,6 +391,66 @@ def game(media_id):
         if external_links:
             data["external_links"] = external_links
         cache.set(cache_key, data)
+    return data
+
+
+def game_taxonomies(media_id):
+    """Fetch only taxonomy fields for an IGDB game, using cached detail data."""
+    cache_key = f"{Sources.IGDB.value}_game_taxonomies_{media_id}"
+    data = cache.get(cache_key)
+    if data is not None:
+        return data
+
+    full_metadata = cache.get(
+        f"{Sources.IGDB.value}_{MediaTypes.GAME.value}_{media_id}",
+    )
+    if full_metadata and "igdb_taxonomies" in full_metadata:
+        data = {
+            "igdb_taxonomies": full_metadata["igdb_taxonomies"],
+            "igdb_updated_at": full_metadata.get("igdb_updated_at"),
+        }
+    else:
+        url = f"{base_url}/games"
+        query = (
+            "fields genres.id,genres.name,themes.id,themes.name,"
+            "keywords.id,keywords.name,updated_at;"
+            f"where id = {media_id};"
+        )
+        headers = {
+            "Client-ID": settings.IGDB_ID,
+            "Authorization": f"Bearer {get_access_token()}",
+        }
+
+        try:
+            response = services.api_request(
+                Sources.IGDB.value,
+                "POST",
+                url,
+                data=query,
+                headers=headers,
+            )
+        except requests.exceptions.HTTPError as error:
+            error_response = handle_error(error)
+            if not error_response or not error_response.get("retry"):
+                raise
+            headers["Authorization"] = f"Bearer {get_access_token()}"
+            response = services.api_request(
+                Sources.IGDB.value,
+                "POST",
+                url,
+                data=query,
+                headers=headers,
+            )
+
+        if not response:
+            services.raise_not_found_error(Sources.IGDB.value, media_id, "game")
+        game_response = response[0]
+        data = {
+            "igdb_taxonomies": get_igdb_taxonomies(game_response),
+            "igdb_updated_at": get_igdb_updated_at(game_response),
+        }
+
+    cache.set(cache_key, data)
     return data
 
 
@@ -498,6 +567,28 @@ def get_list(response, field):
     # e.g game: 25222
     try:
         return [item["name"] for item in response[field]]
+    except KeyError:
+        return None
+
+
+def get_igdb_taxonomies(response):
+    """Return IGDB taxonomy IDs and labels, keeping facet kinds separate."""
+    return {
+        taxonomy: [
+            {"id": item["id"], "name": item["name"]}
+            for item in response.get(taxonomy, [])
+        ]
+        for taxonomy in ("genres", "themes", "keywords")
+    }
+
+
+def get_igdb_updated_at(response):
+    """Convert IGDB's updated_at Unix timestamp to an aware datetime."""
+    try:
+        return timezone.datetime.fromtimestamp(
+            response["updated_at"],
+            tz=timezone.get_current_timezone(),
+        )
     except KeyError:
         return None
 

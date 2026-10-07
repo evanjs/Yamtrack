@@ -1,6 +1,8 @@
 import csv
 import logging
+from decimal import Decimal
 
+import yaml
 from django.apps import apps
 from django.db.models import Field, Prefetch
 
@@ -9,6 +11,12 @@ from app.models import Episode, Item, MediaTypes, Season
 
 logger = logging.getLogger(__name__)
 
+SHARE_MEDIA_TYPES = (
+    MediaTypes.GAME.value,
+    MediaTypes.MOVIE.value,
+    MediaTypes.BOOK.value,
+)
+
 
 class Echo:
     """An object that implements just the write method of the file-like interface."""
@@ -16,6 +24,72 @@ class Echo:
     def write(self, value):
         """Write the value by returning it, instead of storing in a buffer."""
         return value
+
+
+def generate_share_yaml(user):
+    """Generate a structured YAML library export for games, movies, and books."""
+    document = {"format_version": 2}
+    item_fields = ("title", "media_type", "source", "media_id", "image")
+    track_fields = (
+        "status",
+        "score",
+        "progress",
+        "start_date",
+        "end_date",
+        "notes",
+    )
+
+    for media_type in SHARE_MEDIA_TYPES:
+        model = apps.get_model("app", media_type)
+        queryset = (
+            model.objects.filter(user=user)
+            .select_related("item")
+            .prefetch_related("item__igdb_game_metadata__taxonomies")
+        )
+        entries = []
+        for media in queryset.iterator(chunk_size=500):
+            item = {field: getattr(media.item, field) for field in item_fields}
+            if (
+                media_type == MediaTypes.GAME.value
+                and media.item.source == "igdb"
+            ):
+                igdb_metadata = getattr(media.item, "igdb_game_metadata", None)
+                if igdb_metadata is not None:
+                    taxonomy_values = {
+                        "genres": [],
+                        "themes": [],
+                        "keywords": [],
+                    }
+                    kind_to_facet = {
+                        "genre": "genres",
+                        "theme": "themes",
+                        "keyword": "keywords",
+                    }
+                    for taxonomy in sorted(
+                        igdb_metadata.taxonomies.all(),
+                        key=lambda value: (
+                            value.kind,
+                            value.name.casefold(),
+                            value.provider_id,
+                        ),
+                    ):
+                        taxonomy_values[kind_to_facet[taxonomy.kind]].append(
+                            {"id": taxonomy.provider_id, "name": taxonomy.name},
+                        )
+                    item["igdb"] = taxonomy_values
+            tracking = {}
+            for field in track_fields:
+                value = getattr(media, field, None)
+                tracking[field] = float(value) if isinstance(value, Decimal) else value
+            entries.append({"item": item, "tracking": tracking})
+        document[media_type] = entries
+
+    return yaml.safe_dump(
+        document,
+        allow_unicode=True,
+        sort_keys=False,
+        explicit_start=True,
+    )
 
 
 def generate_rows(user):

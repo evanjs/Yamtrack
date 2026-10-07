@@ -487,13 +487,31 @@ def import_goodreads(request):
 @require_GET
 def export_csv(request):
     """View for exporting all media data to a CSV file."""
+    export_format = request.GET.get("format", "yamtrack")
+    if export_format != "yamtrack":
+        return HttpResponse("Unknown export format.", status=400)
+
     now = timezone.localtime()
     response = StreamingHttpResponse(
         streaming_content=exports.generate_rows(request.user),
         content_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="yamtrack_{now}.csv"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="yamtrack_{now}.csv"',
+        },
     )
     logger.info("User %s started CSV export", request.user.username)
+    return response
+
+
+@require_GET
+def export_yaml(request):
+    """View for exporting a share-friendly YAML library."""
+    response = HttpResponse(
+        exports.generate_share_yaml(request.user),
+        content_type="application/yaml",
+        headers={"Content-Disposition": 'attachment; filename="yamtrack_share.yaml"'},
+    )
+    logger.info("User %s started YAML export", request.user.username)
     return response
 
 
