@@ -41,20 +41,19 @@
     {% include "lists/components/list_form.html" %}
   </div>
 
-  <div x-data="{ sort: '{{ current_sort|escapejs }}', type: '{{ request.GET.type|default:'all'|escapejs }}', status: '{{ current_status|escapejs }}', query: '{{ request.GET.q|default:''|escapejs }}', mediaTypeLabels: {
-    {% for media_type in media_types %}'{{ media_type }}': '{{ media_type|media_type_readable_plural }}',{% endfor %}
-    'all': 'All Types' }, statusLabels: {
+  <div x-data="{ sort: '{{ current_sort|escapejs }}', types: [{% for media_type in current_media_types %}'{{ media_type|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}], status: '{{ current_status|escapejs }}', query: '{{ request.GET.q|default:''|escapejs }}', mediaTypeLabels: {
+    {% for media_type in available_media_types %}'{{ media_type }}': '{{ media_type|media_type_readable_plural }}',{% endfor %}
+    }, statusLabels: {
     {% for value, label in status_choices %}
       '{{ value }}': '{{ label }}'
       {% if not forloop.last %},{% endif %}
 
     {% endfor %}
-    }, getMediaTypeLabel() { return this.mediaTypeLabels[this.type] || this.type; } }">
+    }, getMediaTypeLabel() { return this.types.length === {{ available_media_types|length }} ? 'All Types' : this.types.map(type => this.mediaTypeLabels[type] || type).join(', '); } }">
 
     <!-- Form to manage state -->
     <form id="filter-form" class="hidden">
       <input type="hidden" name="sort" x-model="sort">
-      <input type="hidden" name="type" x-model="type">
       <input type="hidden" name="status" x-model="status">
       <input type="hidden" name="q" x-model="query">
     </form>
@@ -70,8 +69,8 @@
                autocomplete="off"
                hx-get="{% url 'list_detail' custom_list.id %}"
                hx-trigger="keyup changed delay:300ms, search"
-               {% if items %}hx-target="#items-grid"{% else %}hx-target="this" hx-swap="none"{% endif %}
-               hx-include="#filter-form"
+               hx-target="#items-grid"
+               hx-include="#filter-form,#type-filter-controls,#taxonomy-filter-form"
                hx-indicator="#search-indicator">
         {% include "app/icons/magnifying-glass.svg" with classes="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" %}
         <div id="search-indicator"
@@ -79,6 +78,10 @@
           <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-500"></div>
         </div>
       </div>
+
+      {% if has_taxonomy_options %}
+        {% include "lists/components/taxonomy_filters.html" %}
+      {% endif %}
 
       <div class="flex items-center gap-2 shrink-0">
         {# Filter by Status #}
@@ -125,8 +128,8 @@
                x-transition:leave-end="transform opacity-0 scale-95">
             {% for value, label in status_choices %}
               <button hx-get="{% url 'list_detail' custom_list.id %}"
-                      {% if items %}hx-target="#items-grid"{% else %}hx-target="this" hx-swap="none"{% endif %}
-                      hx-include="#filter-form"
+                      hx-target="#items-grid"
+                      hx-include="#filter-form,#type-filter-controls,#taxonomy-filter-form"
                       hx-indicator="#loading-indicator"
                       class="block w-full px-4 py-2 text-left text-sm transition-colors cursor-pointer"
                       :class="status === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
@@ -142,11 +145,11 @@
                   @click="open = !open"
                   type="button">
             {% include "app/icons/funnel.svg" with classes="w-4 h-4" %}
-            <span class="text-sm" x-text="getMediaTypeLabel(type)"></span>
+            <span class="text-sm" x-text="getMediaTypeLabel()"></span>
             {% include "app/icons/chevron-down.svg" with classes="w-4 h-4" %}
           </button>
 
-          <div class="absolute right-0 mt-2 py-1 w-48 bg-[#39404b] rounded-md shadow-lg overflow-hidden z-10 border border-gray-700"
+          <div class="absolute right-0 mt-2 p-3 w-64 bg-[#39404b] rounded-md shadow-lg overflow-hidden z-10 border border-gray-700"
                x-cloak
                x-show="open"
                @click.outside="open = false"
@@ -156,24 +159,22 @@
                x-transition:leave="transition ease-in duration-75"
                x-transition:leave-start="transform opacity-100 scale-100"
                x-transition:leave-end="transform opacity-0 scale-95">
-            <button hx-get="{% url 'list_detail' custom_list.id %}"
-                    {% if items %}hx-target="#items-grid"{% else %}hx-target="this" hx-swap="none"{% endif %}
-                    hx-include="#filter-form"
-                    hx-indicator="#loading-indicator"
-                    class="block w-full px-4 py-2 text-left text-sm transition-colors cursor-pointer"
-                    :class="type === 'all' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
-                    @click="type = 'all'; open = false"
-                    type="button">All</button>
-            {% for media_type in media_types %}
-              <button hx-get="{% url 'list_detail' custom_list.id %}"
-                      {% if items %}hx-target="#items-grid"{% else %}hx-target="this" hx-swap="none"{% endif %}
-                      hx-include="#filter-form"
-                      hx-indicator="#loading-indicator"
-                      class="block w-full px-4 py-2 text-left text-sm transition-colors cursor-pointer"
-                      :class="type === '{{ media_type }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
-                      @click="type = '{{ media_type }}'; open = false"
-                      type="button">{{ media_type|media_type_readable_plural }}</button>
-            {% endfor %}
+            <p class="text-xs text-gray-400 mb-2">Choose which types to display</p>
+            <form id="type-filter-controls"
+                  hx-get="{% url 'list_detail' custom_list.id %}"
+                  hx-trigger="change"
+                  hx-target="#items-grid"
+                  hx-include="#filter-form,#taxonomy-filter-form"
+                  hx-indicator="#loading-indicator">
+              <input type="hidden" name="types_selected" value="1">
+              {% for media_type in available_media_types %}
+                <label class="flex items-center gap-2 py-1 text-sm text-gray-200">
+                  <input type="checkbox" name="types" value="{{ media_type }}"
+                         x-model="types" class="rounded border-gray-600 bg-[#2a2f35]">
+                  {{ media_type|media_type_readable_plural }}
+                </label>
+              {% endfor %}
+            </form>
           </div>
         </div>
 
@@ -200,8 +201,8 @@
                x-transition:leave-end="transform opacity-0 scale-95">
             {% for value, label in sort_choices %}
               <button hx-get="{% url 'list_detail' custom_list.id %}"
-                      {% if items %}hx-target="#items-grid"{% else %}hx-target="this" hx-swap="none"{% endif %}
-                      hx-include="#filter-form"
+                      hx-target="#items-grid"
+                      hx-include="#filter-form,#type-filter-controls,#taxonomy-filter-form"
                       hx-indicator="#loading-indicator"
                       class="block w-full px-4 py-2 text-left text-sm transition-colors cursor-pointer"
                       :class="sort === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
@@ -212,23 +213,7 @@
         </div>
       </div>
     </div>
-    {% if items %}
-      <div id="items-grid" class="media-grid">{% include "lists/components/media_grid.html" %}</div>
-    {% else %}
-      <div class="flex flex-col items-center justify-center py-16 bg-[#2a2f35] rounded-lg">
-        <div class="text-center max-w-md mx-auto p-6">
-          <div class="bg-[#39404b] rounded-full p-4 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-            {% include "app/icons/list-add.svg" with classes="w-8 h-8 text-gray-400" %}
-          </div>
-          <h3 class="text-xl font-semibold mb-2">No items in this list yet</h3>
-          <p class="text-gray-400 mb-6">Start adding your favorite media to build your collection</p>
-          <div class="pt-4">
-            <a href="{{ 'tv'|sample_search }}"
-               class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">Browse Media</a>
-          </div>
-        </div>
-      </div>
-    {% endif %}
+    <div id="items-grid" class="media-grid">{% include "lists/components/media_grid.html" %}</div>
 
     <div id="loading-indicator" class="htmx-indicator text-center pt-8">
       <div class="inline-flex justify-center items-center">

@@ -4,7 +4,16 @@ from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
 
-from app.models import TV, Anime, Item, MediaTypes, Movie, Sources, Status
+from app.metadata import store_igdb_game_taxonomies, store_tmdb_movie_taxonomies
+from app.models import (
+    TV,
+    Anime,
+    Item,
+    MediaTypes,
+    Movie,
+    Sources,
+    Status,
+)
 from lists.models import CustomList, CustomListItem
 
 
@@ -325,6 +334,76 @@ class ListDetailViewTests(TestCase):
             response.context["items"][0].media_type,
             MediaTypes.MOVIE.value,
         )
+
+    def test_taxonomy_filters_apply_per_provider_and_preserve_other_types(self):
+        """Provider facets filter their own types without hiding other types."""
+        movie = self.movie_item
+        game = Item.objects.create(
+            media_id="game-101",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Fantasy Game",
+            image="https://example.com/game.jpg",
+        )
+        unrelated_movie = Item.objects.create(
+            media_id="movie-654",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.MOVIE.value,
+            title="Thriller Movie",
+            image="https://example.com/movie.jpg",
+        )
+        for item in (game, unrelated_movie):
+            CustomListItem.objects.create(custom_list=self.custom_list, item=item)
+        store_tmdb_movie_taxonomies(
+            movie, {"genres": [{"id": 27, "name": "Horror"}], "keywords": []}
+        )
+        store_tmdb_movie_taxonomies(
+            unrelated_movie,
+            {"genres": [{"id": 53, "name": "Thriller"}], "keywords": []},
+        )
+        store_igdb_game_taxonomies(
+            game,
+            {"genres": [{"id": 10, "name": "Fantasy"}], "themes": [], "keywords": []},
+        )
+
+        response = self.client.get(
+            reverse("list_detail", args=[self.custom_list.id])
+            + "?tmdb_genre=27&igdb_genre=10"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {item.title for item in response.context["items"]},
+            {"Test Movie", "Fantasy Game", "Test TV Show", "Test Anime"},
+        )
+        self.assertContains(response, "Game filters")
+        self.assertContains(response, "Movie filters")
+        self.assertContains(response, "Horror")
+        self.assertContains(response, "Fantasy")
+
+    def test_list_detail_type_multiselect_can_hide_media_types(self):
+        """Explicit type selection limits visible list items to selected types."""
+        game = Item.objects.create(
+            media_id="game-102",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Test Game",
+            image="https://example.com/game.jpg",
+        )
+        CustomListItem.objects.create(custom_list=self.custom_list, item=game)
+
+        response = self.client.get(
+            reverse("list_detail", args=[self.custom_list.id])
+            + "?types_selected=1"
+            + f"&types={MediaTypes.GAME.value}&types={MediaTypes.MOVIE.value}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {item.media_type for item in response.context["items"]},
+            {MediaTypes.GAME.value, MediaTypes.MOVIE.value},
+        )
+        self.assertContains(response, "Choose which types to display")
 
     @patch.object(get_user_model(), "update_preference")
     @patch.object(CustomList, "user_can_view")

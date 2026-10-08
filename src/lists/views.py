@@ -8,13 +8,146 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
 from app import helpers
-from app.models import Item, MediaManager, MediaTypes
+from app.models import (
+    IGDBGameTaxonomy,
+    IGDBGameTaxonomyAssignment,
+    Item,
+    MediaManager,
+    MediaTypes,
+    Sources,
+    TMDBMovieTaxonomy,
+    TMDBMovieTaxonomyAssignment,
+    tmdb_metadata_expiry_cutoff,
+)
 from app.providers import services
 from lists.forms import CustomListForm
 from lists.models import CustomList, CustomListItem
 from users.models import ListDetailSortChoices, ListSortChoices, MediaStatusChoices
 
 logger = logging.getLogger(__name__)
+
+LIST_TAXONOMY_FACETS = {
+    "igdb": {
+        "model": IGDBGameTaxonomy,
+        "assignment": IGDBGameTaxonomyAssignment,
+        "type": MediaTypes.GAME.value,
+        "source": Sources.IGDB.value,
+        "option_lookup": "game_assignments__metadata__item__custom_lists",
+        "kinds": {
+            "genre": IGDBGameTaxonomy.Kind.GENRE,
+            "theme": IGDBGameTaxonomy.Kind.THEME,
+            "keyword": IGDBGameTaxonomy.Kind.KEYWORD,
+        },
+    },
+    "tmdb": {
+        "model": TMDBMovieTaxonomy,
+        "assignment": TMDBMovieTaxonomyAssignment,
+        "type": MediaTypes.MOVIE.value,
+        "source": Sources.TMDB.value,
+        "option_lookup": "movie_assignments__metadata__item__custom_lists",
+        "kinds": {
+            "genre": TMDBMovieTaxonomy.Kind.GENRE,
+            "keyword": TMDBMovieTaxonomy.Kind.KEYWORD,
+        },
+    },
+}
+
+
+def get_list_taxonomy_filters(query_params):
+    """Parse provider-qualified taxonomy selections for a custom list."""
+    filters = {}
+    for provider, config in LIST_TAXONOMY_FACETS.items():
+        filters[provider] = {}
+        for facet in config["kinds"]:
+            parameter = f"{provider}_{facet}"
+            include = _parse_taxonomy_ids(query_params.getlist(parameter))
+            exclude = _parse_taxonomy_ids(query_params.getlist(f"{parameter}_exclude"))
+            filters[provider][facet] = {"include": include, "exclude": exclude}
+    return filters
+
+
+def _parse_taxonomy_ids(values):
+    """Parse unique positive provider taxonomy IDs."""
+    result = []
+    for value in values:
+        try:
+            provider_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if provider_id > 0 and provider_id not in result:
+            result.append(provider_id)
+    return result
+
+
+def get_list_taxonomy_options(custom_list, current_filters):
+    """Return taxonomy values actually represented in this list."""
+    result = {}
+    for provider, config in LIST_TAXONOMY_FACETS.items():
+        result[provider] = {}
+        for facet, value in config["kinds"].items():
+            queryset = config["model"].objects.filter(
+                kind=value,
+                **{config["option_lookup"]: custom_list},
+            )
+            if provider == "tmdb":
+                queryset = queryset.filter(
+                    movie_assignments__metadata__synced_at__gte=tmdb_metadata_expiry_cutoff(),
+                )
+            selections = current_filters[provider][facet]
+            result[provider][facet] = [
+                {
+                    "provider_id": taxonomy.provider_id,
+                    "name": taxonomy.name,
+                    "state": (
+                        "include"
+                        if taxonomy.provider_id in selections["include"]
+                        else "exclude"
+                        if taxonomy.provider_id in selections["exclude"]
+                        else "neutral"
+                    ),
+                }
+                for taxonomy in queryset.distinct().order_by("name")
+            ]
+    return result
+
+
+def apply_list_taxonomy_filters(items, custom_list, filters):
+    """Apply each provider's facets to its own media type, retaining other types."""
+    for provider, config in LIST_TAXONOMY_FACETS.items():
+        provider_filters = filters[provider]
+        if not any(
+            value["include"] or value["exclude"] for value in provider_filters.values()
+        ):
+            continue
+        matching_items = Item.objects.filter(
+            custom_lists=custom_list,
+            media_type=config["type"],
+            source=config["source"],
+        )
+        for facet, selection in provider_filters.items():
+            kind = config["kinds"][facet]
+            assignment_ids = config["assignment"].objects.filter(
+                metadata__item__custom_lists=custom_list,
+                taxonomy__kind=kind,
+            )
+            if provider == "tmdb":
+                assignment_ids = assignment_ids.filter(
+                    metadata__synced_at__gte=tmdb_metadata_expiry_cutoff(),
+                )
+            if selection["include"]:
+                matching_items = matching_items.filter(
+                    pk__in=assignment_ids.filter(
+                        taxonomy__provider_id__in=selection["include"],
+                    ).values("metadata__item_id"),
+                )
+            if selection["exclude"]:
+                matching_items = matching_items.exclude(
+                    pk__in=assignment_ids.filter(
+                        taxonomy__provider_id__in=selection["exclude"],
+                    ).values("metadata__item_id"),
+                )
+        items = items.filter(~Q(media_type=config["type"]) | Q(pk__in=matching_items))
+    return items
 
 
 @require_GET
@@ -105,7 +238,7 @@ def list_detail(request, list_id):
             "list_detail_sort",
             request.GET.get("sort"),
         ),
-        "media_type": request.GET.get("type", "all"),
+        "media_types": request.GET.getlist("types"),
         "status_filter": request.user.update_preference(
             "list_detail_status",
             request.GET.get("status"),
@@ -118,8 +251,23 @@ def list_detail(request, list_id):
     items = custom_list.items.all()
     if params["search_query"]:
         items = items.filter(title__icontains=params["search_query"])
-    if params["media_type"] != "all":
-        items = items.filter(media_type=params["media_type"])
+    available_media_types = list(items.values_list("media_type", flat=True).distinct())
+    if request.GET.get("types_selected"):
+        params["media_types"] = [
+            media_type
+            for media_type in params["media_types"]
+            if media_type in available_media_types
+        ]
+        items = items.filter(media_type__in=params["media_types"])
+    elif request.GET.get("type") and request.GET["type"] != "all":
+        params["media_types"] = [request.GET["type"]]
+        items = items.filter(media_type=request.GET["type"])
+    else:
+        params["media_types"] = available_media_types
+
+    taxonomy_filters = get_list_taxonomy_filters(request.GET)
+    taxonomy_options = get_list_taxonomy_options(custom_list, taxonomy_filters)
+    items = apply_list_taxonomy_filters(items, custom_list, taxonomy_filters)
 
     # Get distinct media types for filtering
     media_types = items.values_list("media_type", flat=True).distinct()
@@ -182,6 +330,27 @@ def list_detail(request, list_id):
         "current_status": params["status_filter"] or MediaStatusChoices.ALL,
         "sort_choices": ListDetailSortChoices.choices,
         "status_choices": MediaStatusChoices.choices,
+        "available_media_types": available_media_types,
+        "current_media_types": params["media_types"],
+        "taxonomy_filters": taxonomy_filters,
+        "taxonomy_options": taxonomy_options,
+        "taxonomy_groups": [
+            {
+                "provider": provider,
+                "label": "Game filters" if provider == "igdb" else "Movie filters",
+                "facets": [
+                    {"name": facet, "options": values}
+                    for facet, values in provider_options.items()
+                ],
+            }
+            for provider, provider_options in taxonomy_options.items()
+            if any(provider_options.values())
+        ],
+        "has_taxonomy_options": any(
+            option_list
+            for provider_options in taxonomy_options.values()
+            for option_list in provider_options.values()
+        ),
     }
 
     # Additional context for full page render. Soft-navigation body swaps (e.g.

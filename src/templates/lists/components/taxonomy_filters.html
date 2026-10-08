@@ -1,0 +1,35 @@
+<form id="taxonomy-filter-form"
+      class="flex gap-2 flex-wrap"
+      hx-get="{% url 'list_detail' custom_list.id %}"
+      hx-trigger="change"
+      {% if items %}hx-target="#items-grid"{% else %}hx-target="this" hx-swap="none"{% endif %}
+      hx-include="#filter-form,#type-filter-controls"
+      hx-indicator="#loading-indicator">
+  {% for group in taxonomy_groups %}
+    <details class="relative">
+      <summary class="h-10 flex items-center px-4 bg-[#39404b] rounded-md hover:bg-[#454d5a] transition-colors cursor-pointer list-none">{{ group.label }}</summary>
+      <div class="absolute left-0 z-20 mt-2 p-4 w-80 max-h-[70svh] overflow-y-auto bg-[#39404b] rounded-md shadow-lg border border-gray-700">
+        {% for facet in group.facets %}
+          {% if facet.options %}
+            <fieldset class="mb-4 last:mb-0">
+              <legend class="text-sm font-semibold text-white mb-2">{{ facet.name|title }}</legend>
+              <p class="text-xs text-gray-400 mb-2">Click to include (+), exclude (−), or ignore (·).</p>
+              {% for option in facet.options %}
+                <div class="flex items-center gap-2 py-1 text-sm text-gray-200" x-data="{ state: '{{ option.state }}' }">
+                  <input type="hidden" name="{{ group.provider }}_{{ facet.name }}" value="{{ option.provider_id }}" :disabled="state !== 'include'">
+                  <input type="hidden" name="{{ group.provider }}_{{ facet.name }}_exclude" value="{{ option.provider_id }}" :disabled="state !== 'exclude'">
+                  <button type="button" class="w-6 h-6 rounded border text-xs font-bold"
+                          :class="state === 'include' ? 'bg-indigo-600 border-indigo-400 text-white' : state === 'exclude' ? 'bg-red-900 border-red-400 text-white' : 'bg-[#2a2f35] border-gray-600 text-gray-400'"
+                          :aria-label="'{{ option.name|escapejs }}: ' + state + '. Click to change filter state.'"
+                          @click="state = state === 'neutral' ? 'include' : state === 'include' ? 'exclude' : 'neutral'; $nextTick(() => $dispatch('change'))"
+                          x-text="state === 'include' ? '+' : state === 'exclude' ? '−' : '·'"></button>
+                  <span>{{ option.name }}</span>
+                </div>
+              {% endfor %}
+            </fieldset>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </details>
+  {% endfor %}
+</form>
