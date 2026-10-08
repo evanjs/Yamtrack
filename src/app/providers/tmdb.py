@@ -243,6 +243,15 @@ def movie(media_id):
             "details": {
                 "format": "Movie",
                 "release_date": get_start_date(response["release_date"]),
+                "original_title": response.get("original_title", ""),
+                "director": next(
+                    (
+                        member["name"]
+                        for member in credits_response.get("crew", [])
+                        if member.get("job") == "Director" and member.get("name")
+                    ),
+                    "",
+                ),
                 "status": response["status"],
                 "runtime": get_readable_duration(response["runtime"]),
                 "studios": get_companies(response["production_companies"]),
@@ -499,6 +508,12 @@ def process_tv(response):
         "details": {
             "format": "TV",
             "first_air_date": get_start_date(response["first_air_date"]),
+            "original_title": response.get("original_name", ""),
+            "creators": [
+                creator["name"]
+                for creator in response.get("created_by", [])
+                if creator.get("name")
+            ],
             "last_air_date": response["last_air_date"],
             "status": response["status"],
             "seasons": response["number_of_seasons"],

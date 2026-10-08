@@ -20,6 +20,9 @@ urlpatterns = [
         name="lists_modal",
     ),
     path("list/<int:list_id>", views.list_detail, name="list_detail"),
+    path(
+        "list/<int:list_id>/export/csv", views.list_export_csv, name="list_export_csv"
+    ),
     path("list/create", views.create, name="list_create"),
     path("list/edit", views.edit, name="list_edit"),
     path("list/delete", views.delete, name="list_delete"),

@@ -8,6 +8,7 @@ from app.metadata import store_igdb_game_taxonomies, store_tmdb_movie_taxonomies
 from app.models import (
     TV,
     Anime,
+    Game,
     Item,
     MediaTypes,
     Movie,
@@ -990,3 +991,88 @@ class ListItemToggleTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.context["has_item"])  # Item was removed
+
+
+class ListCSVExportTests(TestCase):
+    """Tests for the filtered custom-list CSV export."""
+
+    def test_export_uses_current_filters_and_cached_provider_metadata(self):
+        """Export filtered rows with cached movie, TV, and game details."""
+        user = get_user_model().objects.create_user(username="exporter")
+        custom_list = CustomList.objects.create(name="Export", owner=user)
+        movie = Item.objects.create(
+            media_id="238",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.MOVIE.value,
+            title="The Shining",
+        )
+        tv = Item.objects.create(
+            media_id="1399",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.TV.value,
+            title="Game of Thrones",
+        )
+        game = Item.objects.create(
+            media_id="1942",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="The Witcher 3",
+        )
+        CustomListItem.objects.create(custom_list=custom_list, item=movie)
+        CustomListItem.objects.create(custom_list=custom_list, item=tv)
+        CustomListItem.objects.create(custom_list=custom_list, item=game)
+        Movie.objects.create(item=movie, user=user, status=Status.PLANNING.value)
+        TV.objects.create(item=tv, user=user, status=Status.IN_PROGRESS.value)
+        Game.objects.create(item=game, user=user, status=Status.COMPLETED.value)
+        self.client.force_login(user)
+
+        with patch("lists.views.cache.get") as cached:
+            cached.side_effect = {
+                "tmdb_movie_238": {
+                    "title": "The Shining",
+                    "details": {"release_date": "1980-05-23"},
+                },
+                "tmdb_tv_1399": {
+                    "title": "Game of Thrones",
+                    "details": {"first_air_date": "2011-04-17"},
+                },
+                "igdb_game_1942": {
+                    "title": "The Witcher 3",
+                    "details": {"release_date": "2015-05-19"},
+                },
+            }.get
+            response = self.client.get(
+                reverse("list_export_csv", args=[custom_list.id]),
+                {"types_selected": "1", "types": ["movie"], "q": "Shining"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn("The Shining", response.content.decode())
+        self.assertIn("1980-05-23", response.content.decode())
+        self.assertNotIn("Game of Thrones", response.content.decode())
+        self.assertNotIn("image", response.content.decode().lower())
+
+        with patch("lists.views.cache.get") as cached:
+            cached.side_effect = {
+                "tmdb_movie_238": {
+                    "title": "The Shining",
+                    "details": {"release_date": "1980-05-23"},
+                },
+                "tmdb_tv_1399": {
+                    "title": "Game of Thrones",
+                    "details": {"first_air_date": "2011-04-17"},
+                },
+                "igdb_game_1942": {
+                    "title": "The Witcher 3",
+                    "details": {"release_date": "2015-05-19"},
+                },
+            }.get
+            response = self.client.get(
+                reverse("list_export_csv", args=[custom_list.id])
+            )
+        csv_output = response.content.decode()
+        self.assertIn("Game of Thrones", csv_output)
+        self.assertIn("2011-04-17", csv_output)
+        self.assertIn("The Witcher 3", csv_output)
+        self.assertIn("2015-05-19", csv_output)

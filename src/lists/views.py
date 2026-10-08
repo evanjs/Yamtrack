@@ -1,10 +1,13 @@
+import csv
 import logging
 
 from django.contrib import messages
+from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db.models import Count, F, OuterRef, Q, Subquery
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
 from app import helpers
@@ -370,6 +373,110 @@ def list_detail(request, list_id):
 
     # HTMX partial response
     return render(request, "lists/components/media_grid.html", context)
+
+
+@require_GET
+def list_export_csv(request, list_id):
+    """Export the filtered movie, game, and TV entries from a custom list."""
+    custom_list = get_object_or_404(
+        CustomList.objects.select_related("owner").prefetch_related("collaborators"),
+        id=list_id,
+    )
+    if not custom_list.user_can_view(request.user):
+        msg = "List not found"
+        raise Http404(msg)
+
+    items = custom_list.items.all()
+    query = request.GET.get("q", "")
+    if query:
+        items = items.filter(title__icontains=query)
+    available_types = list(items.values_list("media_type", flat=True).distinct())
+    if request.GET.get("types_selected"):
+        types = [
+            value for value in request.GET.getlist("types") if value in available_types
+        ]
+        items = items.filter(media_type__in=types)
+    elif request.GET.get("type") and request.GET["type"] != "all":
+        types = [request.GET["type"]]
+        items = items.filter(media_type__in=types)
+    else:
+        types = available_types
+
+    filters = get_list_taxonomy_filters(request.GET)
+    items = apply_list_taxonomy_filters(items, custom_list, filters)
+    items = items.filter(
+        media_type__in=[
+            MediaTypes.MOVIE.value,
+            MediaTypes.TV.value,
+            MediaTypes.GAME.value,
+        ]
+    )
+
+    status = request.GET.get("status", MediaStatusChoices.ALL)
+    if status != MediaStatusChoices.ALL:
+        media_by_item_id = MediaManager().fetch_media_for_items(
+            items.values_list("media_type", flat=True).distinct(),
+            items.values_list("id", flat=True),
+            request.user,
+            status_filter=status,
+        )
+        items = items.filter(id__in=media_by_item_id)
+    else:
+        media_by_item_id = MediaManager().fetch_media_for_items(
+            items.values_list("media_type", flat=True).distinct(),
+            items.values_list("id", flat=True),
+            request.user,
+        )
+
+    output = HttpResponse(content_type="text/csv; charset=utf-8")
+    filename = f"{slugify(custom_list.name) or list_id}-media.csv"
+    output["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "title",
+            "release_date",
+            "creator",
+            "original_title",
+            "media_type",
+            "status",
+            "progress",
+            "source",
+            "media_id",
+        ]
+    )
+    for item in (
+        items.select_related().order_by("title", "media_type").iterator(chunk_size=500)
+    ):
+        track = media_by_item_id.get(item.id)
+        metadata = cache.get(f"{item.source}_{item.media_type}_{item.media_id}") or {}
+        details = metadata.get("details", {})
+        date = details.get("release_date") or details.get("first_air_date") or ""
+        creator = (
+            details.get("director")
+            or details.get("creators")
+            or details.get("companies")
+            or ""
+        )
+        if isinstance(creator, list):
+            creator = ", ".join(
+                value.get("name", "") if isinstance(value, dict) else str(value)
+                for value in creator
+            )
+        writer.writerow(
+            [
+                item.title,
+                date,
+                creator,
+                details.get("original_title", ""),
+                item.media_type,
+                getattr(track, "status", ""),
+                getattr(track, "progress", ""),
+                item.source,
+                item.media_id,
+            ]
+        )
+    return output
 
 
 @require_POST
