@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from app.metadata import (
     mark_tmdb_movie_taxonomy_attempt,
+    store_tmdb_movie_credits,
     store_tmdb_movie_taxonomies,
 )
 from app.models import (
@@ -17,6 +18,7 @@ from app.models import (
     Status,
     TMDBMovieMetadata,
 )
+from app.providers.services import ProviderAPIError
 from app.tasks import (
     backfill_tmdb_movie_taxonomies,
     cleanup_expired_tmdb_movie_taxonomies,
@@ -53,6 +55,7 @@ class TMDBMovieTaxonomyBackfillTests(TestCase):
                 "genres": [{"id": 27, "name": "Horror"}],
                 "keywords": [{"id": 1852, "name": "haunting"}],
             },
+            "tmdb_credits": {"cast": [], "crew": []},
         }
 
         result = backfill_tmdb_movie_taxonomies(batch_size=1)
@@ -70,12 +73,13 @@ class TMDBMovieTaxonomyBackfillTests(TestCase):
         with self.assertRaises(ValueError):
             backfill_tmdb_movie_taxonomies(batch_size=0)
 
-    def test_backfill_does_not_replace_previously_stored_taxonomy(self):
-        """Already hydrated items are skipped by ordinary backfill batches."""
+    def test_backfill_skips_items_with_fresh_taxonomy_and_credit_data(self):
+        """Items with both taxonomies and credits are skipped by backfill."""
         store_tmdb_movie_taxonomies(
             self.item,
             {"genres": [{"id": 27, "name": "Horror"}], "keywords": []},
         )
+        store_tmdb_movie_credits(self.item, {"cast": [], "crew": []})
 
         with patch("app.providers.tmdb.movie_taxonomies") as mock_taxonomies:
             result = backfill_tmdb_movie_taxonomies(batch_size=1)
@@ -99,6 +103,7 @@ class TMDBMovieTaxonomyBackfillTests(TestCase):
         metadata.save(update_fields=["synced_at", "last_attempted_at"])
         mock_taxonomies.return_value = {
             "tmdb_taxonomies": {"genres": [], "keywords": []},
+            "tmdb_credits": {"cast": [], "crew": []},
         }
 
         result = backfill_tmdb_movie_taxonomies(batch_size=1)
@@ -124,7 +129,10 @@ class TMDBMovieTaxonomyBackfillTests(TestCase):
 
     @patch(
         "app.providers.tmdb.movie_taxonomies",
-        side_effect=ValueError("bad response"),
+        side_effect=ProviderAPIError(
+            Sources.TMDB.value,
+            RuntimeError("provider unavailable"),
+        ),
     )
     def test_failed_refresh_preserves_last_good_values_and_waits_before_retry(
         self,
@@ -165,7 +173,10 @@ class TMDBMovieTaxonomyBackfillTests(TestCase):
         )
         mock_taxonomies.side_effect = [
             ValueError("temporary provider failure"),
-            {"tmdb_taxonomies": {"genres": [], "keywords": []}},
+            {
+                "tmdb_taxonomies": {"genres": [], "keywords": []},
+                "tmdb_credits": {"cast": [], "crew": []},
+            },
         ]
 
         first_batch = backfill_tmdb_movie_taxonomies(batch_size=1)
@@ -216,6 +227,7 @@ class TMDBMovieTaxonomyBackfillTests(TestCase):
         )
         mock_taxonomies.return_value = {
             "tmdb_taxonomies": {"genres": [], "keywords": []},
+            "tmdb_credits": {"cast": [], "crew": []},
         }
 
         result = refresh_due_tmdb_movie_taxonomies(batch_size=1)

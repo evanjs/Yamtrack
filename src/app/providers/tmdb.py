@@ -215,7 +215,9 @@ def movie(media_id):
             item for item in recommended_items if item["id"] not in collection_ids
         ]
 
-        cast = response.get("credits", {}).get("cast", [])
+        credits_response = response.get("credits", {})
+        cast = credits_response.get("cast", [])
+        crew = credits_response.get("crew", [])
         filtered_cast = [
             {
                 "id": member.get("id"),
@@ -263,6 +265,13 @@ def movie(media_id):
         }
         if tmdb_taxonomies is not None:
             data["tmdb_taxonomies"] = tmdb_taxonomies
+        if isinstance(credits_response, dict) and {"cast", "crew"}.issubset(
+            credits_response,
+        ):
+            data["tmdb_credits"] = {
+                "cast": get_credit_values(cast, credit_type="cast"),
+                "crew": get_credit_values(crew, credit_type="crew"),
+            }
 
         cache.set(cache_key, data)
 
@@ -270,8 +279,8 @@ def movie(media_id):
 
 
 def movie_taxonomies(media_id):
-    """Fetch only TMDB movie genres and keywords for bounded backfills."""
-    cache_key = f"tmdb_movie_taxonomies_{media_id}"
+    """Fetch TMDB movie genres, keywords, and credits for bounded backfills."""
+    cache_key = f"tmdb_movie_metadata_v2_{media_id}"
     data = cache.get(cache_key)
 
     if data is None:
@@ -279,7 +288,7 @@ def movie_taxonomies(media_id):
             Sources.TMDB.value,
             "GET",
             f"{base_url}/movie/{media_id}",
-            params=base_params,
+            params={**base_params, "append_to_response": "credits"},
         )
         keywords_response = services.api_request(
             Sources.TMDB.value,
@@ -291,6 +300,16 @@ def movie_taxonomies(media_id):
             "tmdb_taxonomies": {
                 "genres": get_taxonomy_values(movie_response["genres"]),
                 "keywords": get_taxonomy_values(keywords_response["keywords"]),
+            },
+            "tmdb_credits": {
+                "cast": get_credit_values(
+                    movie_response["credits"]["cast"],
+                    credit_type="cast",
+                ),
+                "crew": get_credit_values(
+                    movie_response["credits"]["crew"],
+                    credit_type="crew",
+                ),
             },
         }
         cache.set(cache_key, data)
@@ -637,6 +656,29 @@ def get_genres(genres):
 def get_taxonomy_values(values):
     """Return TMDB taxonomy IDs and names without changing their identity."""
     return [{"id": value["id"], "name": value["name"]} for value in values]
+
+
+def get_credit_values(values, *, credit_type):
+    """Normalize TMDB credits for relational storage without display assets."""
+    if credit_type == "cast":
+        return [
+            {
+                "id": value["id"],
+                "name": value["name"],
+                "character": value.get("character", ""),
+                "order": value.get("order"),
+            }
+            for value in values
+        ]
+    return [
+        {
+            "id": value["id"],
+            "name": value["name"],
+            "department": value.get("department", ""),
+            "job": value["job"],
+        }
+        for value in values
+    ]
 
 
 def get_country(countries):

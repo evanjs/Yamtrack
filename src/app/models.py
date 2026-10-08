@@ -359,9 +359,15 @@ class TMDBMovieMetadata(models.Model):
     )
     synced_at = models.DateTimeField(null=True, blank=True)
     last_attempted_at = models.DateTimeField(null=True, blank=True)
+    credits_synced_at = models.DateTimeField(null=True, blank=True)
     taxonomies = models.ManyToManyField(
         TMDBMovieTaxonomy,
         through="TMDBMovieTaxonomyAssignment",
+        related_name="movie_metadata",
+    )
+    credits = models.ManyToManyField(
+        "TMDBMovieCredit",
+        through="TMDBMovieCreditAssignment",
         related_name="movie_metadata",
     )
 
@@ -399,6 +405,63 @@ class TMDBMovieTaxonomyAssignment(models.Model):
         return f"{self.metadata.item} — {self.taxonomy.kind}: {self.taxonomy.name}"
 
 
+class TMDBMovieCredit(models.Model):
+    """A TMDB person shared by one or more movie credits."""
+
+    provider_id = models.PositiveBigIntegerField(unique=True)
+    name = models.TextField()
+
+    def __str__(self):
+        """Return the person's display name."""
+        return self.name
+
+
+class TMDBMovieCreditAssignment(models.Model):
+    """A TMDB person's role and movie-specific credit details."""
+
+    class CreditType(models.TextChoices):
+        """Kinds of movie credits returned by TMDB."""
+
+        CAST = "cast", "Cast"
+        CREW = "crew", "Crew"
+
+    metadata = models.ForeignKey(
+        TMDBMovieMetadata,
+        on_delete=models.CASCADE,
+        related_name="credit_assignments",
+    )
+    person = models.ForeignKey(
+        TMDBMovieCredit,
+        on_delete=models.CASCADE,
+        related_name="movie_assignments",
+    )
+    credit_type = models.CharField(max_length=8, choices=CreditType)
+    department = models.CharField(max_length=100, blank=True, default="")
+    job = models.CharField(max_length=100)
+    character = models.CharField(max_length=255, blank=True, default="")
+    cast_order = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        """Model options for movie credit relationships."""
+
+        constraints = [
+            UniqueConstraint(
+                fields=["metadata", "person", "credit_type", "job", "character"],
+                name="unique_tmdb_movie_credit_assignment",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["credit_type", "job", "person"],
+                name="tmdb_credit_role_person_idx",
+            ),
+        ]
+
+    def __str__(self):
+        """Return the person's role on the associated movie."""
+        return f"{self.metadata.item} — {self.job}: {self.person.name}"
+
+
 class MediaManager(models.Manager):
     """Custom manager for media models."""
 
@@ -406,7 +469,7 @@ class MediaManager(models.Manager):
         """Return list of historical model names."""
         return [f"historical{media_type}" for media_type in MediaTypes.values]
 
-    def get_media_list(
+    def get_media_list(  # noqa: PLR0913
         self,
         user,
         media_type,
@@ -416,6 +479,8 @@ class MediaManager(models.Manager):
         search=None,
         taxonomy_filters=None,
         include_unknown_taxonomy=False,
+        credit_filters=None,
+        credit_match="any",
     ):
         """Get media list based on filters, sorting and search."""
         model = apps.get_model(app_label="app", model_name=media_type)
@@ -444,6 +509,9 @@ class MediaManager(models.Manager):
                     include_unknown_taxonomy,
                     (*taxonomy_config, media_type),
                 )
+
+        if media_type == MediaTypes.MOVIE.value and credit_filters:
+            queryset = self._filter_tmdb_credits(queryset, credit_filters, credit_match)
 
         if search:
             search_filter = Q(item__title__icontains=search)
@@ -523,6 +591,42 @@ class MediaManager(models.Manager):
                 )
             queryset = queryset.filter(Exists(has_known_taxonomy))
         return queryset
+
+    def _filter_tmdb_credits(self, queryset, credit_filters, credit_match):
+        """Filter movies by additive TMDB person/role rules."""
+        matches = []
+        for credit_filter in credit_filters:
+            assignment = TMDBMovieCreditAssignment.objects.filter(
+                metadata__item_id=OuterRef("item_id"),
+                metadata__item__source=Sources.TMDB.value,
+                metadata__item__media_type=MediaTypes.MOVIE.value,
+                metadata__credits_synced_at__gte=tmdb_metadata_expiry_cutoff(),
+                person__provider_id=credit_filter["person_id"],
+            )
+            if credit_filter["role"] == "cast":
+                assignment = assignment.filter(
+                    credit_type=TMDBMovieCreditAssignment.CreditType.CAST,
+                )
+            elif credit_filter["role"] == "crew":
+                assignment = assignment.filter(
+                    credit_type=TMDBMovieCreditAssignment.CreditType.CREW,
+                )
+            else:
+                assignment = assignment.filter(
+                    credit_type=TMDBMovieCreditAssignment.CreditType.CREW,
+                    job=credit_filter["role"],
+                )
+            matches.append(Exists(assignment))
+
+        if credit_match == "all":
+            for match in matches:
+                queryset = queryset.filter(match)
+            return queryset
+
+        any_match = Q()
+        for match in matches:
+            any_match |= Q(match)
+        return queryset.filter(any_match)
 
     def _apply_prefetch_related(self, queryset, media_type):
         """Apply appropriate prefetch_related based on media type."""

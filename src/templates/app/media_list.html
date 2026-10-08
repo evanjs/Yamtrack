@@ -33,7 +33,7 @@
                hx-get="{% url 'medialist' target_user.username media_type %}"
                hx-trigger="keyup changed delay:300ms, search"
                {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
-               hx-include="#filter-form,#taxonomy-filter-form"
+               hx-include="#filter-form,#taxonomy-filter-form,#credit-filter-form"
                hx-indicator="#search-indicator">
         {% include "app/icons/magnifying-glass.svg" with classes="w-6 h-6 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" %}
         <div id="search-indicator"
@@ -53,7 +53,7 @@
                 hx-get="{% url 'medialist' target_user.username media_type %}"
                 hx-trigger="change"
                 {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
-                hx-include="#filter-form"
+                hx-include="#filter-form,#credit-filter-form"
                 hx-indicator="#loading-indicator">
             <div role="tablist" aria-label="{{ taxonomy_label }} facet types" class="flex gap-1 border-b border-gray-600">
               {% for facet, options in taxonomy_options.items %}
@@ -116,6 +116,72 @@
         </details>
       {% endif %}
 
+      {% if has_credit_options %}
+        <details class="relative">
+          <summary class="flex items-center px-4 py-2 bg-[#39404b] rounded-md hover:bg-[#454d5a] transition-colors cursor-pointer list-none">
+            Credits{% if credit_filters %} ({{ credit_filters|length }}){% endif %}
+          </summary>
+          <form id="credit-filter-form"
+                class="absolute z-20 mt-2 p-4 w-[min(36rem,90vw)] bg-[#39404b] rounded-md shadow-lg border border-gray-700"
+                hx-get="{% url 'medialist' target_user.username media_type %}"
+                hx-trigger="change, submit"
+                {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
+                hx-include="#filter-form,#taxonomy-filter-form"
+                hx-indicator="#loading-indicator">
+            <div class="flex items-center justify-between gap-3 mb-3">
+              <p class="text-sm font-semibold">Credits</p>
+              <label class="text-xs text-gray-300">Match
+                <select name="credit_match" class="ml-1 px-2 py-1 rounded bg-[#2a2f35] text-white">
+                  <option value="any" {% if credit_match == "any" %}selected{% endif %}>Any</option>
+                  <option value="all" {% if credit_match == "all" %}selected{% endif %}>All</option>
+                </select>
+              </label>
+            </div>
+            <datalist id="credit-role-options">
+              {% for role, label in credit_roles %}<option value="{{ label }}"></option>{% endfor %}
+            </datalist>
+            <div id="credit-rules" class="space-y-2">
+              {% for rule in credit_filters %}
+                <div class="credit-rule grid gap-2 items-start" style="grid-template-columns: 9rem minmax(0, 1fr) 2rem">
+                  <div class="credit-role-picker relative">
+                    <input type="search" class="credit-role-search w-full px-2 py-2 rounded bg-[#2a2f35] text-white text-sm" list="credit-role-options" value="{{ rule.role_label }}" placeholder="Search roles…" autocomplete="off" aria-label="Credit role" role="combobox" aria-autocomplete="list" aria-expanded="false">
+                    <input type="hidden" class="credit-role-value" name="credit_role" value="{{ rule.role }}">
+                    <div class="credit-role-options hidden absolute left-0 right-0 z-30 mt-1 max-h-60 overflow-y-auto rounded border border-gray-600 shadow-lg" style="background-color: #20252a" role="listbox" aria-label="Available credit roles">
+                      {% for role, label in credit_roles %}<button type="button" class="credit-role-option block w-full px-3 py-2 text-left text-sm text-gray-100 hover:bg-[#39404b]" data-value="{{ role }}" role="option">{{ label }}</button>{% endfor %}
+                    </div>
+                  </div>
+                  <div class="relative">
+                    <input type="hidden" name="credit_person" value="{{ rule.person_id }}">
+                    <input type="search" class="credit-person w-full px-3 py-2 rounded bg-[#2a2f35] text-white text-sm" value="{{ rule.person_name }}" placeholder="Search people…" autocomplete="off" data-search-url="{% url 'tmdb_movie_credit_search' target_user.username %}" aria-label="Search people">
+                    <div class="credit-suggestions hidden absolute left-0 right-0 z-30 mt-1 max-h-48 overflow-y-auto rounded border border-gray-600 shadow-lg" style="background-color: #20252a" role="listbox"></div>
+                  </div>
+                  <button type="button" class="credit-remove h-9 rounded text-gray-400 hover:bg-red-950 hover:text-red-200" aria-label="Remove credit rule">×</button>
+                </div>
+              {% endfor %}
+            </div>
+            <button type="button" id="add-credit-rule" class="mt-3 text-sm text-indigo-200 hover:text-white">＋ Add credit rule</button>
+            <p class="mt-2 text-xs text-gray-400">Any matches at least one row; All requires every row on the movie.</p>
+          </form>
+        </details>
+        <template id="credit-rule-template">
+          <div class="credit-rule grid gap-2 items-start" style="grid-template-columns: 9rem minmax(0, 1fr) 2rem">
+            <div class="credit-role-picker relative">
+              <input type="search" class="credit-role-search w-full px-2 py-2 rounded bg-[#2a2f35] text-white text-sm" list="credit-role-options" value="Cast" placeholder="Search roles…" autocomplete="off" aria-label="Credit role" role="combobox" aria-autocomplete="list" aria-expanded="false">
+              <input type="hidden" class="credit-role-value" name="credit_role" value="cast">
+              <div class="credit-role-options hidden absolute left-0 right-0 z-30 mt-1 max-h-60 overflow-y-auto rounded border border-gray-600 shadow-lg" style="background-color: #20252a" role="listbox" aria-label="Available credit roles">
+                {% for role, label in credit_roles %}<button type="button" class="credit-role-option block w-full px-3 py-2 text-left text-sm text-gray-100 hover:bg-[#39404b]" data-value="{{ role }}" role="option">{{ label }}</button>{% endfor %}
+              </div>
+            </div>
+            <div class="relative">
+              <input type="hidden" name="credit_person" value="">
+              <input type="search" class="credit-person w-full px-3 py-2 rounded bg-[#2a2f35] text-white text-sm" placeholder="Search people…" autocomplete="off" data-search-url="{% url 'tmdb_movie_credit_search' target_user.username %}" aria-label="Search people">
+              <div class="credit-suggestions hidden absolute left-0 right-0 z-30 mt-1 max-h-48 overflow-y-auto rounded border border-gray-600 shadow-lg" style="background-color: #20252a" role="listbox"></div>
+            </div>
+            <button type="button" class="credit-remove h-9 rounded text-gray-400 hover:bg-red-950 hover:text-red-200" aria-label="Remove credit rule">×</button>
+          </div>
+        </template>
+      {% endif %}
+
       <div class="flex gap-2 flex-wrap">
         <!-- Filter by Status -->
         <div class="relative" x-data="{ open: false }">
@@ -140,7 +206,7 @@
             {% for value, label in status_choices %}
               <button hx-get="{% url 'medialist' target_user.username media_type %}"
                       {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
-                      hx-include="#filter-form,#taxonomy-filter-form"
+                      hx-include="#filter-form,#taxonomy-filter-form,#credit-filter-form"
                       hx-indicator="#loading-indicator"
                       class="block w-full px-4 py-2 text-left text-sm transition-colors cursor-pointer"
                       :class="status === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
@@ -173,7 +239,7 @@
             {% for value, label in sort_choices %}
               <button hx-get="{% url 'medialist' target_user.username media_type %}"
                       {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
-                      hx-include="#filter-form,#taxonomy-filter-form"
+                      hx-include="#filter-form,#taxonomy-filter-form,#credit-filter-form"
                       hx-indicator="#loading-indicator"
                       class="block w-full px-4 py-2 text-left text-sm transition-colors cursor-pointer"
                       :class="sort === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
@@ -185,12 +251,12 @@
 
         <!-- Layout Toggle -->
         <div class="flex rounded-md overflow-hidden border border-gray-700">
-          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for facet, selections in current_taxonomy_filters.items %}{% for id in selections.include %}{{ facet }}={{ id }}&{% endfor %}{% for id in selections.exclude %}{{ facet }}_exclude={{ id }}&{% endfor %}{% endfor %}layout=grid`"
+          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for facet, selections in current_taxonomy_filters.items %}{% for id in selections.include %}{{ facet }}={{ id }}&{% endfor %}{% for id in selections.exclude %}{{ facet }}_exclude={{ id }}&{% endfor %}{% endfor %}{% for rule in credit_filters %}credit_role={{ rule.role|urlencode }}&credit_person={{ rule.person_id }}&{% endfor %}{% if credit_filters %}credit_match={{ credit_match }}&{% endif %}layout=grid`"
              class="p-2 cursor-pointer"
              :class="layout === 'grid' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a]'"
              title="Grid View"
              @click="layout = 'grid'">{% include "app/icons/four-square.svg" with classes="w-5 h-5" %}</a>
-          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for facet, selections in current_taxonomy_filters.items %}{% for id in selections.include %}{{ facet }}={{ id }}&{% endfor %}{% for id in selections.exclude %}{{ facet }}_exclude={{ id }}&{% endfor %}{% endfor %}layout=table`"
+          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for facet, selections in current_taxonomy_filters.items %}{% for id in selections.include %}{{ facet }}={{ id }}&{% endfor %}{% for id in selections.exclude %}{{ facet }}_exclude={{ id }}&{% endfor %}{% endfor %}{% for rule in credit_filters %}credit_role={{ rule.role|urlencode }}&credit_person={{ rule.person_id }}&{% endfor %}{% if credit_filters %}credit_match={{ credit_match }}&{% endif %}layout=table`"
              class="p-2 cursor-pointer"
              :class="layout === 'table' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a]'"
              title="Table View"
@@ -311,3 +377,176 @@
 {% block search_bar %}
   {% if request.user.is_authenticated %}{{ block.super }}{% endif %}
 {% endblock search_bar %}
+
+{% block js %}
+  {{ block.super }}
+  {% if has_credit_options %}
+    <script>
+      (() => {
+        const form = document.getElementById("credit-filter-form");
+        const rules = document.getElementById("credit-rules");
+        const template = document.getElementById("credit-rule-template");
+        if (!form || !rules || !template) return;
+
+        function bindRule(row) {
+          const roleSearch = row.querySelector(".credit-role-search");
+          const roleValue = row.querySelector(".credit-role-value");
+          const roleMenu = row.querySelector(".credit-role-options");
+          const roleOptions = [...roleMenu.querySelectorAll(".credit-role-option")];
+          const search = row.querySelector(".credit-person");
+          const person = row.querySelector('input[name="credit_person"]');
+          const suggestions = row.querySelector(".credit-suggestions");
+          let timer;
+
+          function filterRoleOptions(query) {
+            const needle = query.trim().toLowerCase();
+            const visibleOptions = roleOptions.filter((option) => {
+              const visible = option.textContent.toLowerCase().includes(needle);
+              option.classList.toggle("hidden", !visible);
+              return visible;
+            });
+            roleMenu.classList.toggle("hidden", !visibleOptions.length);
+            roleSearch.setAttribute("aria-expanded", String(visibleOptions.length > 0));
+            return visibleOptions;
+          }
+
+          function closeRoleOptions() {
+            roleMenu.classList.add("hidden");
+            roleSearch.setAttribute("aria-expanded", "false");
+          }
+
+          function chooseRole(option) {
+            const selectedRole = option.dataset.value;
+            if (roleValue.value !== selectedRole) {
+              person.value = "";
+              search.value = "";
+              suggestions.classList.add("hidden");
+            }
+            roleValue.value = selectedRole;
+            roleSearch.value = option.textContent.trim();
+            closeRoleOptions();
+            roleValue.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+
+          roleSearch.addEventListener("focus", () => {
+            filterRoleOptions(roleValue.value ? "" : roleSearch.value);
+          });
+          roleSearch.addEventListener("input", () => {
+            roleValue.value = "";
+            person.value = "";
+            search.value = "";
+            suggestions.classList.add("hidden");
+            filterRoleOptions(roleSearch.value);
+          });
+          roleSearch.addEventListener("change", () => {
+            const selectedOption = roleOptions.find(
+              (option) =>
+                option.textContent.trim().toLowerCase() ===
+                roleSearch.value.trim().toLowerCase(),
+            );
+            if (selectedOption) chooseRole(selectedOption);
+          });
+          roleSearch.addEventListener("keydown", (event) => {
+            const visibleOptions = roleOptions.filter(
+              (option) => !option.classList.contains("hidden"),
+            );
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              visibleOptions[0]?.focus();
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              if (visibleOptions[0]) chooseRole(visibleOptions[0]);
+            } else if (event.key === "Escape") {
+              closeRoleOptions();
+            }
+          });
+          roleMenu.addEventListener("keydown", (event) => {
+            const visibleOptions = roleOptions.filter(
+              (option) => !option.classList.contains("hidden"),
+            );
+            const currentIndex = visibleOptions.indexOf(document.activeElement);
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              const offset = event.key === "ArrowDown" ? 1 : -1;
+              const nextIndex = Math.max(
+                0,
+                Math.min(visibleOptions.length - 1, currentIndex + offset),
+              );
+              visibleOptions[nextIndex]?.focus();
+            } else if (event.key === "Escape") {
+              closeRoleOptions();
+              roleSearch.focus();
+            }
+          });
+          roleOptions.forEach((option) => {
+            option.addEventListener("click", () => chooseRole(option));
+          });
+
+          search.addEventListener("input", () => {
+            person.value = "";
+            clearTimeout(timer);
+            const query = search.value.trim();
+            if (query.length < 2) {
+              suggestions.classList.add("hidden");
+              return;
+            }
+            timer = setTimeout(async () => {
+              const url = new URL(search.dataset.searchUrl, window.location.href);
+              url.searchParams.set("q", query);
+              url.searchParams.set("role", roleValue.value);
+              try {
+                const response = await fetch(url, { headers: { Accept: "application/json" } });
+                const payload = await response.json();
+                suggestions.replaceChildren();
+                payload.results.forEach((result) => {
+                  const option = document.createElement("button");
+                  option.type = "button";
+                  option.className = "block w-full px-3 py-2 text-left text-sm text-gray-100 hover:bg-[#39404b]";
+                  option.textContent = result.name;
+                  option.addEventListener("click", () => {
+                    search.value = result.name;
+                    person.value = result.id;
+                    suggestions.classList.add("hidden");
+                    person.dispatchEvent(new Event("change", { bubbles: true }));
+                  });
+                  suggestions.append(option);
+                });
+                suggestions.classList.toggle("hidden", !payload.results.length);
+              } catch (error) {
+                suggestions.classList.add("hidden");
+                console.error("TMDB person search failed", error);
+              }
+            }, 180);
+          });
+          search.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              suggestions.querySelector("button")?.click();
+            }
+          });
+          row.querySelector(".credit-remove").addEventListener("click", () => {
+            row.remove();
+            form.dispatchEvent(new Event("change", { bubbles: true }));
+          });
+        }
+
+        rules.querySelectorAll(".credit-rule").forEach(bindRule);
+        document.getElementById("add-credit-rule").addEventListener("click", () => {
+          const row = template.content.firstElementChild.cloneNode(true);
+          rules.append(row);
+          bindRule(row);
+          row.querySelector(".credit-role").focus();
+        });
+        document.addEventListener("click", (event) => {
+          if (!event.target.closest(".credit-rule")) {
+            rules.querySelectorAll(".credit-suggestions").forEach((menu) => menu.classList.add("hidden"));
+          }
+          if (!event.target.closest(".credit-role-picker")) {
+            rules.querySelectorAll(".credit-role-options").forEach((menu) => menu.classList.add("hidden"));
+            rules.querySelectorAll(".credit-role-search").forEach((input) => input.setAttribute("aria-expanded", "false"));
+          }
+        });
+      })();
+    </script>
+  {% endif %}
+{% endblock js %}

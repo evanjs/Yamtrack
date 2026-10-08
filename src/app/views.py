@@ -23,6 +23,7 @@ from app.forms import EpisodeForm, ManualItemForm, get_form_class
 from app.metadata import (
     mark_tmdb_movie_taxonomy_attempt,
     store_igdb_game_taxonomies,
+    store_tmdb_movie_credits,
     store_tmdb_movie_taxonomies,
 )
 from app.models import (
@@ -32,9 +33,12 @@ from app.models import (
     IGDBGameTaxonomy,
     Item,
     MediaTypes,
+    Movie,
     Season,
     Sources,
     Status,
+    TMDBMovieCredit,
+    TMDBMovieCreditAssignment,
     TMDBMovieTaxonomy,
     UserMessage,
     tmdb_metadata_expiry_cutoff,
@@ -51,6 +55,7 @@ from users.models import (
 )
 
 logger = logging.getLogger(__name__)
+TMDB_CREDIT_SEARCH_MIN_LENGTH = 2
 
 
 def _persist_igdb_taxonomies_for_item(item, metadata):
@@ -75,6 +80,8 @@ def _persist_tmdb_taxonomies_for_item(item, metadata):
         store_tmdb_movie_taxonomies(item, metadata["tmdb_taxonomies"])
     else:
         mark_tmdb_movie_taxonomy_attempt(item)
+    if "tmdb_credits" in metadata:
+        store_tmdb_movie_credits(item, metadata["tmdb_credits"])
 
 
 IGDB_TAXONOMY_KIND_BY_PARAMETER = {
@@ -96,6 +103,131 @@ def get_igdb_game_taxonomy_filters(query_params):
 def get_tmdb_movie_taxonomy_filters(query_params):
     """Parse repeated included/excluded TMDB movie taxonomy IDs."""
     return get_provider_taxonomy_filters(query_params, TMDB_TAXONOMY_KIND_BY_PARAMETER)
+
+
+def get_tmdb_movie_credit_filters(query_params):
+    """Parse repeated TMDB credit role/person pairs and their match mode."""
+    roles = query_params.getlist("credit_role")
+    person_ids = query_params.getlist("credit_person")
+    filters = []
+    seen = set()
+    for role, raw_person_id in zip(roles, person_ids, strict=False):
+        normalized_role = normalize_tmdb_credit_role(role)
+        try:
+            person_id = int(raw_person_id)
+        except (TypeError, ValueError):
+            continue
+        if person_id <= 0 or not normalized_role:
+            continue
+        key = (normalized_role, person_id)
+        if key not in seen:
+            filters.append({"role": normalized_role, "person_id": person_id})
+            seen.add(key)
+    match = query_params.get("credit_match", "any")
+    return filters, match if match in {"any", "all"} else "any"
+
+
+def normalize_tmdb_credit_role(role):
+    """Normalize the Cast/Crew catch-all values while preserving TMDB jobs."""
+    role = role.strip()
+    return role.casefold() if role.casefold() in {"cast", "crew"} else role
+
+
+def get_tmdb_movie_credit_roles(target_user):
+    """Return TMDB credit roles represented in a user's tracked movie library."""
+    jobs = (
+        TMDBMovieCreditAssignment.objects.filter(
+            metadata__item__movie__user=target_user,
+            metadata__credits_synced_at__gte=tmdb_metadata_expiry_cutoff(),
+            credit_type=TMDBMovieCreditAssignment.CreditType.CREW,
+        )
+        .values_list("job", flat=True)
+        .distinct()
+        .order_by("job")
+    )
+    choices = [
+        ("cast", "Cast"),
+        ("crew", "Crew"),
+        ("Director", "Director"),
+        ("Writer", "Writer"),
+        ("Screenplay", "Screenplay"),
+        ("Composer", "Composer"),
+        ("Producer", "Producer"),
+    ]
+    known_roles = {value for value, _ in choices}
+    choices.extend((job, job) for job in jobs if job not in known_roles)
+    return choices
+
+
+def get_tmdb_movie_credit_filter_context(target_user, media_type, query_params):
+    """Build role/person filter state and choices for one movie list page."""
+    if media_type != MediaTypes.MOVIE.value:
+        return [], "any", []
+    credit_filters, credit_match = get_tmdb_movie_credit_filters(query_params)
+    credit_roles = get_tmdb_movie_credit_roles(target_user)
+    selected_people = {
+        person.provider_id: person.name
+        for person in TMDBMovieCredit.objects.filter(
+            provider_id__in=[entry["person_id"] for entry in credit_filters],
+        )
+    }
+    for credit_filter in credit_filters:
+        credit_filter["role_label"] = dict(credit_roles).get(
+            credit_filter["role"],
+            credit_filter["role"],
+        )
+        credit_filter["person_name"] = selected_people.get(
+            credit_filter["person_id"],
+            "",
+        )
+    return credit_filters, credit_match, credit_roles
+
+
+@login_not_required
+@require_GET
+def tmdb_movie_credit_search(request, username):
+    """Search people credited in a visible user's tracked movie library."""
+    target_user = get_object_or_404(User, username=username)
+    if target_user.profile_private and request.user != target_user:
+        raise Http404
+
+    query = request.GET.get("q", "").strip()
+    if len(query) < TMDB_CREDIT_SEARCH_MIN_LENGTH:
+        return JsonResponse({"results": []})
+
+    assignments = TMDBMovieCreditAssignment.objects.filter(
+        metadata__item_id__in=Movie.objects.filter(user=target_user).values("item_id"),
+        metadata__credits_synced_at__gte=tmdb_metadata_expiry_cutoff(),
+    )
+    role = normalize_tmdb_credit_role(request.GET.get("role", ""))
+    if role == "cast":
+        assignments = assignments.filter(
+            credit_type=TMDBMovieCreditAssignment.CreditType.CAST,
+        )
+    elif role == "crew":
+        assignments = assignments.filter(
+            credit_type=TMDBMovieCreditAssignment.CreditType.CREW,
+        )
+    elif role:
+        assignments = assignments.filter(
+            credit_type=TMDBMovieCreditAssignment.CreditType.CREW,
+            job=role,
+        )
+    people = (
+        TMDBMovieCredit.objects.filter(
+            movie_assignments__in=assignments,
+            name__icontains=query,
+        )
+        .distinct()
+        .order_by("name")[:12]
+    )
+    return JsonResponse(
+        {
+            "results": [
+                {"id": person.provider_id, "name": person.name} for person in people
+            ],
+        },
+    )
 
 
 def get_provider_taxonomy_filters(query_params, kind_by_parameter):
@@ -380,6 +512,11 @@ def media_list(request, username, media_type):
         active_taxonomy_filters,
         taxonomy_options,
     ) = get_media_taxonomy_filter_context(target_user, media_type, request.GET)
+    credit_filters, credit_match, credit_roles = get_tmdb_movie_credit_filter_context(
+        target_user,
+        media_type,
+        request.GET,
+    )
 
     # Prepare status filter for database query
     if not status_filter:
@@ -393,6 +530,8 @@ def media_list(request, username, media_type):
         sort_filter=sort_filter,
         search=search_query,
         taxonomy_filters=active_taxonomy_filters or None,
+        credit_filters=credit_filters or None,
+        credit_match=credit_match,
         include_unknown_taxonomy=getattr(
             request.user,
             "include_unknown_taxonomy",
@@ -433,6 +572,10 @@ def media_list(request, username, media_type):
         "taxonomy_label": taxonomy_label,
         "current_taxonomy_filters": current_taxonomy_filters,
         "taxonomy_selected_counts": taxonomy_selected_counts,
+        "credit_filters": credit_filters,
+        "credit_match": credit_match,
+        "credit_roles": credit_roles,
+        "has_credit_options": bool(credit_roles),
     }
 
     # Handle HTMX requests for partial updates. Soft-navigation requests (e.g.

@@ -10,12 +10,14 @@ from django.utils import timezone
 from app.metadata import (
     mark_tmdb_movie_taxonomy_attempt,
     store_igdb_game_taxonomies,
+    store_tmdb_movie_credits,
     store_tmdb_movie_taxonomies,
 )
 from app.models import (
     Item,
     MediaTypes,
     Sources,
+    TMDBMovieCredit,
     TMDBMovieMetadata,
     TMDBMovieTaxonomy,
     UserMessage,
@@ -105,6 +107,8 @@ def get_due_tmdb_movie_items(after_item_id=0, batch_size=100, *, fair_order=Fals
         Q(tmdb_movie_metadata__isnull=True)
         | Q(tmdb_movie_metadata__synced_at__isnull=True)
         | Q(tmdb_movie_metadata__synced_at__lt=refresh_cutoff)
+        | Q(tmdb_movie_metadata__credits_synced_at__isnull=True)
+        | Q(tmdb_movie_metadata__credits_synced_at__lt=refresh_cutoff)
     )
     retry_allowed = (
         Q(tmdb_movie_metadata__last_attempted_at__isnull=True)
@@ -144,7 +148,16 @@ def refresh_tmdb_movie_items(items):
             mark_tmdb_movie_taxonomy_attempt(item)
             metadata = tmdb.movie_taxonomies(item.media_id)
             store_tmdb_movie_taxonomies(item, metadata["tmdb_taxonomies"])
-        except (requests.exceptions.RequestException, KeyError, TypeError, ValueError):
+            if "tmdb_credits" in metadata:
+                store_tmdb_movie_credits(item, metadata["tmdb_credits"])
+        except (
+            services.ProviderAPIError,
+            requests.exceptions.RequestException,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            mark_tmdb_movie_taxonomy_attempt(item)
             logger.exception("Failed to backfill TMDB taxonomy for Item %s", item.pk)
             failed_ids.append(item.pk)
         else:
@@ -190,6 +203,7 @@ def cleanup_expired_tmdb_movie_taxonomies():
     """Delete TMDB taxonomy records older than the configured hard retention cap."""
     expired = TMDBMovieMetadata.objects.filter(
         Q(synced_at__lt=tmdb_metadata_expiry_cutoff())
+        | Q(credits_synced_at__lt=tmdb_metadata_expiry_cutoff())
         | Q(
             synced_at__isnull=True,
             last_attempted_at__lt=tmdb_metadata_expiry_cutoff(),
@@ -204,9 +218,14 @@ def cleanup_expired_tmdb_movie_taxonomies():
     taxonomy_count = orphaned_taxonomies.count()
     orphaned_taxonomies.delete()
 
+    orphaned_credits = TMDBMovieCredit.objects.filter(movie_assignments__isnull=True)
+    credits_deleted = orphaned_credits.count()
+    orphaned_credits.delete()
+
     result = {
         "metadata_deleted": expired_count,
         "taxonomies_deleted": taxonomy_count,
+        "credits_deleted": credits_deleted,
     }
     logger.info("TMDB taxonomy cleanup completed: %s", result)
     return result
