@@ -39,6 +39,19 @@ class SidebarViewTests(TestCase):
             response,
             "When excluding tags, include items with unknown tags?",
         )
+        self.assertNotContains(response, "img/tmdb-logo.svg")
+        self.assertNotContains(
+            response,
+            "This product uses TMDB and the TMDB APIs",
+        )
+
+    def test_about_page_contains_provider_attributions(self):
+        """Provider credits live in About rather than the global page footer."""
+        response = self.client.get(reverse("about"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Movie and TV streaming providers from")
+        self.assertContains(response, "JustWatch")
         self.assertContains(
             response,
             (
