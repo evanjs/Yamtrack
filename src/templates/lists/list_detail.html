@@ -12,7 +12,7 @@
 
 {% block content %}
   <div class="flex items-center justify-between mb-6"
-       x-data="{ showModal: false }">
+       x-data="listPageState()">
     <div>
       <h1 class="text-3xl font-bold mb-2">{{ custom_list.name }}</h1>
       <div class="flex items-center gap-4">
@@ -40,12 +40,50 @@
         <span>Edit List</span>
       </button>
       <button type="button"
-              @click="const params = new URLSearchParams(); document.querySelectorAll('#filter-form, #type-filter-controls, #taxonomy-filter-form').forEach(form => new FormData(form).forEach((value, key) => params.append(key, value))); window.location.href = '{% url 'list_export_csv' custom_list.id %}?' + params.toString()"
+              @click="prepareCsvExport('{% url 'list_export_csv' custom_list.id %}')"
               class="px-4 py-2 bg-[#39404b] hover:bg-[#454d5a] rounded-md transition-colors text-sm whitespace-nowrap">
         Export filtered CSV
       </button>
     </div>
     {% include "lists/components/list_form.html" %}
+
+    <div x-cloak
+         x-show="exportModalOpen"
+         @keydown.escape.window="closeExportModal()"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+         role="presentation">
+      <section class="w-full max-w-md rounded-lg border border-gray-700 bg-[#2a2f35] p-6 shadow-xl"
+               role="dialog"
+               aria-modal="true"
+               aria-labelledby="csv-export-title">
+        <h2 id="csv-export-title" class="mb-2 text-xl font-semibold">CSV export ready</h2>
+        <p class="mb-5 text-sm text-gray-300" x-show="exportPreparing">Preparing your filtered CSV…</p>
+        <p class="mb-5 text-sm text-gray-300"
+           x-show="!exportPreparing && !exportError"
+           x-text="exportFilename ? `Ready to share ${exportFilename}` : 'Preparing your CSV…'"></p>
+        <p class="mb-5 text-sm text-red-300"
+           x-show="exportError"
+           x-text="exportError"></p>
+        <p class="mb-5 text-sm text-gray-300"
+           x-show="exportStatus"
+           x-text="exportStatus"></p>
+        <div class="flex flex-wrap justify-end gap-3">
+          <button type="button"
+                  @click="closeExportModal()"
+                  class="rounded-md bg-[#39404b] px-4 py-2 text-sm hover:bg-[#454d5a]">Back to list</button>
+          <button type="button"
+                  x-show="!exportPreparing && canShareExport"
+                  @click="shareExport()"
+                  class="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">Share CSV</button>
+          <button type="button"
+                  x-show="!exportPreparing && !canShareExport"
+                  @click="downloadExport()"
+                  class="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+            Download CSV
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 
   <div x-data="{ sort: '{{ current_sort|escapejs }}', types: [{% for media_type in current_media_types %}'{{ media_type|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}], status: '{{ current_status|escapejs }}', query: '{{ request.GET.q|default:''|escapejs }}', mediaTypeLabels: {
@@ -228,6 +266,81 @@
       </div>
     </div>
   </div>
+  <script>
+    function listPageState() {
+      return {
+        showModal: false,
+        exportModalOpen: false,
+        exportPreparing: false,
+        exportFile: null,
+        exportFilename: '',
+        exportUrl: '',
+        exportError: '',
+        exportStatus: '',
+        exportRequestId: 0,
+        canShareExport: false,
+        async prepareCsvExport(url) {
+          const requestId = ++this.exportRequestId;
+          const params = new URLSearchParams();
+          document.querySelectorAll('#filter-form, #type-filter-controls, #taxonomy-filter-form')
+            .forEach((form) => new FormData(form).forEach((value, key) => params.append(key, value)));
+          this.exportUrl = `${url}?${params.toString()}`;
+          this.exportModalOpen = true;
+          this.exportPreparing = true;
+          this.exportFile = null;
+          this.exportFilename = '';
+          this.exportError = '';
+          this.exportStatus = '';
+          this.canShareExport = false;
+          try {
+            const response = await fetch(this.exportUrl, { credentials: 'same-origin' });
+            if (!response.ok) throw new Error('CSV request failed');
+            const blob = await response.blob();
+            if (requestId !== this.exportRequestId) return;
+            const disposition = response.headers.get('Content-Disposition') || '';
+            this.exportFilename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'list-export.csv';
+            this.exportFile = new File([blob], this.exportFilename, { type: blob.type || 'text/csv' });
+            this.canShareExport = Boolean(navigator.share && navigator.canShare?.({ files: [this.exportFile] }));
+          } catch (error) {
+            if (requestId === this.exportRequestId) {
+              this.exportError = 'Could not prepare the CSV. You can still try a direct download.';
+            }
+          } finally {
+            if (requestId === this.exportRequestId) this.exportPreparing = false;
+          }
+        },
+        async shareExport() {
+          try {
+            await navigator.share({ files: [this.exportFile], title: this.exportFilename });
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              this.exportStatus = 'Sharing was canceled. You can try again or go back to your list.';
+            } else {
+              this.canShareExport = false;
+              this.exportError = 'Sharing did not complete. You can download the CSV instead.';
+            }
+          }
+        },
+        closeExportModal() {
+          this.exportRequestId += 1;
+          this.exportModalOpen = false;
+          this.exportPreparing = false;
+        },
+        downloadExport() {
+          if (!this.exportFile) {
+            window.location.assign(this.exportUrl);
+            return;
+          }
+          const objectUrl = URL.createObjectURL(this.exportFile);
+          const link = document.createElement('a');
+          link.href = objectUrl;
+          link.download = this.exportFilename;
+          link.click();
+          window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        },
+      };
+    }
+  </script>
 {% endblock content %}
 
 {% block js %}

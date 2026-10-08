@@ -235,6 +235,14 @@ class ListDetailViewTests(TestCase):
             item=self.anime_item,
         )
 
+    def test_csv_export_has_in_app_return_and_share_controls(self):
+        """Render a return path around the native CSV share sheet."""
+        response = self.client.get(reverse("list_detail", args=[self.custom_list.id]))
+
+        self.assertContains(response, "Share CSV")
+        self.assertContains(response, "Back to list")
+        self.assertContains(response, "navigator.share")
+
     @patch.object(get_user_model(), "update_preference")
     @patch.object(CustomList, "user_can_view")
     def test_list_detail_view(
