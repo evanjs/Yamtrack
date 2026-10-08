@@ -410,6 +410,35 @@ class ListDetailViewTests(TestCase):
         )
         self.assertContains(response, "Choose which types to display")
 
+    def test_list_detail_type_options_are_unique_for_game_only_list(self):
+        """A list with several games gets one Games option, not one per item."""
+        game_list = CustomList.objects.create(
+            name="Game Backlog",
+            owner=self.user,
+        )
+        game_data = [
+            ("90146", "Another Sight"),
+            ("165390", "Blasphemous II"),
+            ("252358", "Bye Sweet Carole"),
+            ("180154", "Islets"),
+            ("143829", "Ruffy and the Riverside"),
+            ("27367", "Yoku's Island Express"),
+        ]
+        for media_id, title in game_data:
+            game = Item.objects.create(
+                media_id=media_id,
+                source=Sources.IGDB.value,
+                media_type=MediaTypes.GAME.value,
+                title=title,
+            )
+            CustomListItem.objects.create(custom_list=game_list, item=game)
+
+        response = self.client.get(reverse("list_detail", args=[game_list.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["available_media_types"], ["game"])
+        self.assertContains(response, 'name="types" value="game"', count=1)
+
     @patch.object(get_user_model(), "update_preference")
     @patch.object(CustomList, "user_can_view")
     def test_list_detail_view_filter_by_status(

@@ -254,7 +254,9 @@ def list_detail(request, list_id):
     items = custom_list.items.all()
     if params["search_query"]:
         items = items.filter(title__icontains=params["search_query"])
-    available_media_types = list(items.values_list("media_type", flat=True).distinct())
+    available_media_types = list(
+        items.order_by().values_list("media_type", flat=True).distinct(),
+    )
     if request.GET.get("types_selected"):
         params["media_types"] = [
             media_type
