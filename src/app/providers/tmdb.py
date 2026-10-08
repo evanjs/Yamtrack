@@ -190,6 +190,23 @@ def movie(media_id):
         except requests.exceptions.HTTPError as error:
             handle_error(error)
 
+        tmdb_taxonomies = None
+        try:
+            keywords_response = services.api_request(
+                Sources.TMDB.value,
+                "GET",
+                f"{base_url}/movie/{media_id}/keywords",
+                params=base_params,
+            )
+            tmdb_taxonomies = {
+                "genres": get_taxonomy_values(response["genres"]),
+                "keywords": get_taxonomy_values(keywords_response["keywords"]),
+            }
+        except requests.exceptions.RequestException as error:
+            logger.warning("Failed to get movie keywords: %s", error)
+        except (KeyError, TypeError) as error:
+            logger.warning("Invalid TMDB movie taxonomy response: %s", error)
+
         # Filter out collection items from recommendations, to avoid duplicates
         collection_items = get_collection(collection_response)
         collection_ids = [item["media_id"] for item in collection_items]
@@ -244,7 +261,38 @@ def movie(media_id):
             ),
             "providers": response.get("watch/providers", {}).get("results", {}),
         }
+        if tmdb_taxonomies is not None:
+            data["tmdb_taxonomies"] = tmdb_taxonomies
 
+        cache.set(cache_key, data)
+
+    return data
+
+
+def movie_taxonomies(media_id):
+    """Fetch only TMDB movie genres and keywords for bounded backfills."""
+    cache_key = f"tmdb_movie_taxonomies_{media_id}"
+    data = cache.get(cache_key)
+
+    if data is None:
+        movie_response = services.api_request(
+            Sources.TMDB.value,
+            "GET",
+            f"{base_url}/movie/{media_id}",
+            params=base_params,
+        )
+        keywords_response = services.api_request(
+            Sources.TMDB.value,
+            "GET",
+            f"{base_url}/movie/{media_id}/keywords",
+            params=base_params,
+        )
+        data = {
+            "tmdb_taxonomies": {
+                "genres": get_taxonomy_values(movie_response["genres"]),
+                "keywords": get_taxonomy_values(keywords_response["keywords"]),
+            },
+        }
         cache.set(cache_key, data)
 
     return data
@@ -584,6 +632,11 @@ def get_genres(genres):
     if genres:
         return [genre["name"] for genre in genres]
     return None
+
+
+def get_taxonomy_values(values):
+    """Return TMDB taxonomy IDs and names without changing their identity."""
+    return [{"id": value["id"], "name": value["name"]} for value in values]
 
 
 def get_country(countries):

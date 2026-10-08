@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import timedelta
 
 from django.apps import apps
 from django.conf import settings
@@ -35,6 +36,28 @@ from app import providers
 from app.mixins import CalendarTriggerMixin
 
 logger = logging.getLogger(__name__)
+
+
+# TMDB API Terms cap retention at six months; the 150-day cutoff leaves a margin.
+# https://www.themoviedb.org/api-terms-of-use
+TMDB_TAXONOMY_REFRESH_AFTER = timedelta(days=30)
+TMDB_TAXONOMY_EVICT_AFTER = timedelta(days=150)
+TMDB_TAXONOMY_RETRY_AFTER = timedelta(days=1)
+
+
+def tmdb_metadata_expiry_cutoff(reference_time=None):
+    """Return the conservative 150-day TMDB taxonomy retention cutoff."""
+    return (reference_time or timezone.now()) - TMDB_TAXONOMY_EVICT_AFTER
+
+
+def tmdb_metadata_refresh_cutoff(reference_time=None):
+    """Return when TMDB taxonomy is due for proactive refresh."""
+    return (reference_time or timezone.now()) - TMDB_TAXONOMY_REFRESH_AFTER
+
+
+def tmdb_metadata_retry_cutoff(reference_time=None):
+    """Return the retry cutoff for previously failed TMDB taxonomy fetches."""
+    return (reference_time or timezone.now()) - TMDB_TAXONOMY_RETRY_AFTER
 
 
 class Sources(models.TextChoices):
@@ -298,6 +321,84 @@ class IGDBGameTaxonomyAssignment(models.Model):
         return f"{self.metadata.item} — {self.taxonomy.kind}: {self.taxonomy.name}"
 
 
+class TMDBMovieTaxonomy(models.Model):
+    """TMDB movie taxonomy value with identity distinct by facet kind."""
+
+    class Kind(models.TextChoices):
+        """Taxonomy families exposed by TMDB movie metadata."""
+
+        GENRE = "genre", "Genre"
+        KEYWORD = "keyword", "Keyword"
+
+    kind = models.CharField(max_length=12, choices=Kind)
+    provider_id = models.PositiveBigIntegerField()
+    name = models.TextField()
+
+    class Meta:
+        """Model options for TMDB movie taxonomy values."""
+
+        constraints = [
+            UniqueConstraint(
+                fields=["kind", "provider_id"],
+                name="unique_tmdb_movie_taxonomy_kind_id",
+            ),
+        ]
+
+    def __str__(self):
+        """Return the taxonomy label."""
+        return self.name
+
+
+class TMDBMovieMetadata(models.Model):
+    """Persist shared TMDB taxonomy metadata for a movie Item."""
+
+    item = models.OneToOneField(
+        Item,
+        on_delete=models.CASCADE,
+        related_name="tmdb_movie_metadata",
+    )
+    synced_at = models.DateTimeField(null=True, blank=True)
+    last_attempted_at = models.DateTimeField(null=True, blank=True)
+    taxonomies = models.ManyToManyField(
+        TMDBMovieTaxonomy,
+        through="TMDBMovieTaxonomyAssignment",
+        related_name="movie_metadata",
+    )
+
+    def __str__(self):
+        """Return the associated movie Item's title."""
+        return f"TMDB metadata for {self.item}"
+
+
+class TMDBMovieTaxonomyAssignment(models.Model):
+    """Associate a TMDB taxonomy value with a movie metadata record."""
+
+    metadata = models.ForeignKey(
+        TMDBMovieMetadata,
+        on_delete=models.CASCADE,
+        related_name="taxonomy_assignments",
+    )
+    taxonomy = models.ForeignKey(
+        TMDBMovieTaxonomy,
+        on_delete=models.CASCADE,
+        related_name="movie_assignments",
+    )
+
+    class Meta:
+        """Model options for TMDB movie taxonomy assignments."""
+
+        constraints = [
+            UniqueConstraint(
+                fields=["metadata", "taxonomy"],
+                name="unique_tmdb_movie_taxonomy_assignment",
+            ),
+        ]
+
+    def __str__(self):
+        """Return the assigned taxonomy label and movie Item."""
+        return f"{self.metadata.item} — {self.taxonomy.kind}: {self.taxonomy.name}"
+
+
 class MediaManager(models.Manager):
     """Custom manager for media models."""
 
@@ -311,8 +412,10 @@ class MediaManager(models.Manager):
         media_type,
         status_filter,
         sort_filter,
+        *,
         search=None,
         taxonomy_filters=None,
+        include_unknown_taxonomy=False,
     ):
         """Get media list based on filters, sorting and search."""
         model = apps.get_model(app_label="app", model_name=media_type)
@@ -321,18 +424,26 @@ class MediaManager(models.Manager):
         if status_filter != users.models.MediaStatusChoices.ALL:
             queryset = queryset.filter(status=status_filter)
 
-        if taxonomy_filters and media_type == MediaTypes.GAME.value:
-            for kind, provider_ids in taxonomy_filters.items():
-                if not provider_ids:
-                    continue
-                matching_taxonomies = IGDBGameTaxonomyAssignment.objects.filter(
-                    metadata__item_id=OuterRef("item_id"),
-                    metadata__item__source=Sources.IGDB.value,
-                    metadata__item__media_type=MediaTypes.GAME.value,
-                    taxonomy__kind=kind,
-                    taxonomy__provider_id__in=provider_ids,
+        if taxonomy_filters:
+            taxonomy_config = {
+                MediaTypes.GAME.value: (
+                    IGDBGameTaxonomyAssignment,
+                    IGDBGameMetadata,
+                    Sources.IGDB.value,
+                ),
+                MediaTypes.MOVIE.value: (
+                    TMDBMovieTaxonomyAssignment,
+                    TMDBMovieMetadata,
+                    Sources.TMDB.value,
+                ),
+            }.get(media_type)
+            if taxonomy_config:
+                queryset = self._filter_taxonomies(
+                    queryset,
+                    taxonomy_filters,
+                    include_unknown_taxonomy,
+                    (*taxonomy_config, media_type),
                 )
-                queryset = queryset.filter(Exists(matching_taxonomies))
 
         if search:
             search_filter = Q(item__title__icontains=search)
@@ -357,6 +468,60 @@ class MediaManager(models.Manager):
 
         if sort_filter:
             return self._sort_media_list(queryset, sort_filter, media_type)
+        return queryset
+
+    def _filter_taxonomies(
+        self,
+        queryset,
+        taxonomy_filters,
+        include_unknown_taxonomy,
+        taxonomy_config,
+    ):
+        """Apply included/excluded provider facets and the unknown-data policy."""
+        assignment_model, metadata_model, source, media_type = taxonomy_config
+        active_taxonomy_filter = False
+        tmdb_cutoff = (
+            tmdb_metadata_expiry_cutoff() if source == Sources.TMDB.value else None
+        )
+        for kind, selections in taxonomy_filters.items():
+            include_ids = selections.get("include", [])
+            exclude_ids = selections.get("exclude", [])
+            if not include_ids and not exclude_ids:
+                continue
+            active_taxonomy_filter = True
+
+            for provider_ids, excluded in (
+                (include_ids, False),
+                (exclude_ids, True),
+            ):
+                if not provider_ids:
+                    continue
+                matching_taxonomies = assignment_model.objects.filter(
+                    metadata__item_id=OuterRef("item_id"),
+                    metadata__item__source=source,
+                    metadata__item__media_type=media_type,
+                    taxonomy__kind=kind,
+                    taxonomy__provider_id__in=provider_ids,
+                )
+                if tmdb_cutoff is not None:
+                    matching_taxonomies = matching_taxonomies.filter(
+                        metadata__synced_at__gte=tmdb_cutoff,
+                    )
+                queryset = (
+                    queryset.exclude(Exists(matching_taxonomies))
+                    if excluded
+                    else queryset.filter(Exists(matching_taxonomies))
+                )
+
+        if active_taxonomy_filter and not include_unknown_taxonomy:
+            has_known_taxonomy = metadata_model.objects.filter(
+                item_id=OuterRef("item_id"),
+            )
+            if tmdb_cutoff is not None:
+                has_known_taxonomy = has_known_taxonomy.filter(
+                    synced_at__gte=tmdb_cutoff,
+                )
+            queryset = queryset.filter(Exists(has_known_taxonomy))
         return queryset
 
     def _apply_prefetch_related(self, queryset, media_type):

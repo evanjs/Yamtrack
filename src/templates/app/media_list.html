@@ -42,20 +42,20 @@
         </div>
       </div>
 
-      {% if media_type == MediaTypes.GAME.value and has_taxonomy_options %}
+      {% if has_taxonomy_options %}
         <details class="relative">
           <summary class="flex items-center px-4 py-2 bg-[#39404b] rounded-md hover:bg-[#454d5a] transition-colors cursor-pointer list-none">
-            IGDB facets
+            {{ taxonomy_label }} facets
           </summary>
           <form id="taxonomy-filter-form"
-                x-data="{ activeFacet: 'genre', selectedCounts: { genre: {{ current_taxonomy_filters.genre|length }}, theme: {{ current_taxonomy_filters.theme|length }}, keyword: {{ current_taxonomy_filters.keyword|length }} } }"
+                x-data="{ activeFacet: 'genre', selectedCounts: { genre: {{ taxonomy_selected_counts.genre }}, theme: {{ taxonomy_selected_counts.theme }}, keyword: {{ taxonomy_selected_counts.keyword }} } }"
                 class="absolute z-20 mt-2 p-4 w-80 max-h-[70svh] overflow-y-auto bg-[#39404b] rounded-md shadow-lg border border-gray-700"
                 hx-get="{% url 'medialist' target_user.username media_type %}"
                 hx-trigger="change"
                 {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
                 hx-include="#filter-form"
                 hx-indicator="#loading-indicator">
-            <div role="tablist" aria-label="IGDB facet types" class="flex gap-1 border-b border-gray-600">
+            <div role="tablist" aria-label="{{ taxonomy_label }} facet types" class="flex gap-1 border-b border-gray-600">
               {% for facet, options in taxonomy_options.items %}
                 <button type="button"
                         role="tab"
@@ -80,6 +80,7 @@
                         x-show="activeFacet === '{{ facet }}'"
                         x-data="{ needle: '' }"
                         class="pt-3">
+                <p class="text-xs text-gray-400 mb-2">Click a value to include (+), exclude (−), or ignore (·).</p>
                 <input type="search"
                        x-model="needle"
                        placeholder="Find {{ facet }}..."
@@ -87,16 +88,26 @@
                        class="w-full mb-2 px-2 py-1 rounded bg-[#2a2f35] text-white text-sm">
                 <div class="max-h-80 overflow-y-auto space-y-1">
                   {% for option in options %}
-                    <label x-show="!needle || '{{ option.name|escapejs }}'.toLowerCase().includes(needle.toLowerCase())"
-                           class="flex items-start gap-2 text-sm text-gray-200">
-                      <input type="checkbox"
-                             name="{{ facet }}"
-                             value="{{ option.provider_id }}"
-                             {% if option.selected %}checked{% endif %}
-                             @change="selectedCounts['{{ facet }}'] = $root.querySelectorAll('input[name={{ facet }}]:checked').length"
-                             class="mt-1 accent-indigo-500">
+                    <div x-show="!needle || '{{ option.name|escapejs }}'.toLowerCase().includes(needle.toLowerCase())"
+                         class="flex items-start gap-2 text-sm text-gray-200">
+                      <span x-data="{ state: '{{ option.state }}' }" class="flex items-center gap-2">
+                        <input type="hidden"
+                               name="{{ facet }}"
+                               value="{{ option.provider_id }}"
+                               :disabled="state !== 'include'">
+                        <input type="hidden"
+                               name="{{ facet }}_exclude"
+                               value="{{ option.provider_id }}"
+                               :disabled="state !== 'exclude'">
+                        <button type="button"
+                                class="w-6 h-6 rounded border text-xs font-bold"
+                                :class="state === 'include' ? 'bg-indigo-600 border-indigo-400 text-white' : state === 'exclude' ? 'bg-red-900 border-red-400 text-white' : 'bg-[#2a2f35] border-gray-600 text-gray-400'"
+                                :aria-label="'{{ option.name|escapejs }}: ' + state + '. Click to change filter state.'"
+                                @click="const wasActive = state !== 'neutral'; state = state === 'neutral' ? 'include' : state === 'include' ? 'exclude' : 'neutral'; selectedCounts['{{ facet }}'] += (state !== 'neutral' ? 1 : 0) - (wasActive ? 1 : 0); $nextTick(() => $dispatch('change'))"
+                                x-text="state === 'include' ? '+' : state === 'exclude' ? '−' : '·'"></button>
+                      </span>
                       <span>{{ option.name }}</span>
-                    </label>
+                    </div>
                   {% endfor %}
                 </div>
               </fieldset>
@@ -174,12 +185,12 @@
 
         <!-- Layout Toggle -->
         <div class="flex rounded-md overflow-hidden border border-gray-700">
-          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for id in current_taxonomy_filters.genre %}genre={{ id }}&{% endfor %}{% for id in current_taxonomy_filters.theme %}theme={{ id }}&{% endfor %}{% for id in current_taxonomy_filters.keyword %}keyword={{ id }}&{% endfor %}layout=grid`"
+          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for facet, selections in current_taxonomy_filters.items %}{% for id in selections.include %}{{ facet }}={{ id }}&{% endfor %}{% for id in selections.exclude %}{{ facet }}_exclude={{ id }}&{% endfor %}{% endfor %}layout=grid`"
              class="p-2 cursor-pointer"
              :class="layout === 'grid' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a]'"
              title="Grid View"
              @click="layout = 'grid'">{% include "app/icons/four-square.svg" with classes="w-5 h-5" %}</a>
-          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for id in current_taxonomy_filters.genre %}genre={{ id }}&{% endfor %}{% for id in current_taxonomy_filters.theme %}theme={{ id }}&{% endfor %}{% for id in current_taxonomy_filters.keyword %}keyword={{ id }}&{% endfor %}layout=table`"
+          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}{% for facet, selections in current_taxonomy_filters.items %}{% for id in selections.include %}{{ facet }}={{ id }}&{% endfor %}{% for id in selections.exclude %}{{ facet }}_exclude={{ id }}&{% endfor %}{% endfor %}layout=table`"
              class="p-2 cursor-pointer"
              :class="layout === 'table' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a]'"
              title="Table View"

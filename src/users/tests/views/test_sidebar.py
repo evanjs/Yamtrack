@@ -35,6 +35,32 @@ class SidebarViewTests(TestCase):
         self.assertIn(MediaTypes.TV.value, response.context["media_types"])
         self.assertIn(MediaTypes.MOVIE.value, response.context["media_types"])
         self.assertNotIn(MediaTypes.EPISODE.value, response.context["media_types"])
+        self.assertContains(
+            response,
+            "When excluding tags, include items with unknown tags?",
+        )
+        self.assertContains(
+            response,
+            (
+                "This product uses TMDB and the TMDB APIs but is not endorsed, "
+                "certified, or otherwise approved by TMDB."
+            ),
+        )
+        self.assertContains(response, "img/tmdb-logo.svg")
+
+    def test_unknown_taxonomy_preference_can_be_enabled(self):
+        """The preferences form stores the opt-in for unknown taxonomy results."""
+        response = self.client.post(
+            reverse("preferences"),
+            {
+                "include_unknown_taxonomy": "on",
+                "media_types_checkboxes": [MediaTypes.TV.value],
+            },
+        )
+
+        self.assertRedirects(response, reverse("preferences"))
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.include_unknown_taxonomy)
 
     def test_sidebar_post_update_preferences(self):
         """Test POST request to update preferences."""
