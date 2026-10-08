@@ -374,6 +374,11 @@ class User(AbstractUser):
         help_text="Hide zero ratings from media cards",
     )
 
+    include_unknown_taxonomy = models.BooleanField(
+        default=False,
+        help_text="Allow taxonomy exclusions to include items with unknown taxonomy",
+    )
+
     # Watch provider region
     watch_provider_region = models.CharField(
         max_length=5,

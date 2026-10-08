@@ -2,7 +2,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from app.metadata import store_igdb_game_taxonomies
+from app.metadata import (
+    store_igdb_game_taxonomies,
+    store_tmdb_movie_taxonomies,
+)
 from app.models import (
     Game,
     Item,
@@ -124,7 +127,7 @@ class MediaListViewTests(TestCase):
 
         response = self.client.get(
             reverse("medialist", args=[self.user.username, MediaTypes.GAME.value])
-            + "?genre=4&genre=5&theme=10",
+            + "?genre=4&genre=5&theme_exclude=11",
         )
 
         self.assertEqual(response.status_code, 200)
@@ -135,13 +138,18 @@ class MediaListViewTests(TestCase):
         self.assertContains(response, "Theme")
         self.assertContains(response, "Keyword")
         self.assertContains(response, 'name="genre"')
+        self.assertContains(response, 'name="theme_exclude"')
         self.assertContains(response, 'value="4"')
-        self.assertContains(response, "checked")
+        self.assertContains(response, "Click a value to include")
         self.assertEqual(response.context["media_list"].paginator.count, 1)
         self.assertEqual(response.context["media_list"][0].item.title, "First Game")
         self.assertEqual(
             response.context["current_taxonomy_filters"],
-            {"genre": [4, 5], "theme": [10], "keyword": []},
+            {
+                "genre": {"include": [4, 5], "exclude": []},
+                "theme": {"include": [], "exclude": [11]},
+                "keyword": {"include": [], "exclude": []},
+            },
         )
         self.assertEqual(
             [
@@ -149,6 +157,48 @@ class MediaListViewTests(TestCase):
                 for option in response.context["taxonomy_options"]["genre"]
             ],
             ["Adventure", "Fighting"],
+        )
+
+    def test_movie_list_filters_by_tmdb_genre_and_keyword(self):
+        """Movie list reuses the facet control for TMDB taxonomy values."""
+        movie_items = []
+        for media_id, title, genre, keyword in [
+            ("321", "Horror Movie", (27, "Horror"), (12, "ghost")),
+            ("654", "Thriller Movie", (53, "Thriller"), (13, "mystery")),
+        ]:
+            item = Item.objects.create(
+                media_id=media_id,
+                source=Sources.TMDB.value,
+                media_type=MediaTypes.MOVIE.value,
+                title=title,
+                image="https://example.com/poster.jpg",
+            )
+            Movie.objects.bulk_create(
+                [Movie(item=item, user=self.user, status=Status.COMPLETED)],
+            )
+            store_tmdb_movie_taxonomies(
+                item,
+                {
+                    "genres": [{"id": genre[0], "name": genre[1]}],
+                    "keywords": [{"id": keyword[0], "name": keyword[1]}],
+                },
+            )
+            movie_items.append(item)
+
+        response = self.client.get(
+            reverse("medialist", args=[self.user.username, MediaTypes.MOVIE.value])
+            + "?genre=27&genre=53&keyword_exclude=13",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["has_taxonomy_options"])
+        self.assertContains(response, "TMDB facets")
+        self.assertContains(response, 'name="keyword_exclude"')
+        self.assertEqual(response.context["media_list"].paginator.count, 1)
+        self.assertEqual(response.context["media_list"][0].item, movie_items[0])
+        self.assertEqual(
+            response.context["current_taxonomy_filters"]["genre"],
+            {"include": [27, 53], "exclude": []},
         )
 
     def test_media_list_htmx_request(self):

@@ -5,7 +5,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from app.metadata import store_igdb_game_taxonomies
+from app.metadata import (
+    store_igdb_game_taxonomies,
+    store_tmdb_movie_taxonomies,
+)
 from app.models import (
     TV,
     Anime,
@@ -17,6 +20,7 @@ from app.models import (
     Season,
     Sources,
     Status,
+    TMDBMovieMetadata,
 )
 
 
@@ -113,6 +117,36 @@ class CreateMedia(TestCase):
         self.assertCountEqual(
             metadata.taxonomies.values_list("name", flat=True),
             ["Fighting", "co-op"],
+        )
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_create_tmdb_movie_persists_taxonomies(self, mock_get_metadata):
+        """Newly tracked TMDB movies save genre and keyword metadata."""
+        mock_get_metadata.return_value = {
+            "title": "Example Movie",
+            "image": "https://example.com/poster.jpg",
+            "max_progress": 1,
+            "tmdb_taxonomies": {
+                "genres": [{"id": 27, "name": "Horror"}],
+                "keywords": [{"id": 1852, "name": "haunting"}],
+            },
+        }
+
+        self.client.post(
+            reverse("media_save"),
+            {
+                "media_id": "321",
+                "source": Sources.TMDB.value,
+                "media_type": MediaTypes.MOVIE.value,
+                "status": Status.PLANNING.value,
+                "progress": "",
+            },
+        )
+
+        metadata = TMDBMovieMetadata.objects.get(item__media_id="321")
+        self.assertCountEqual(
+            metadata.taxonomies.values_list("name", flat=True),
+            ["Horror", "haunting"],
         )
 
     def test_create_season(self):
@@ -460,3 +494,57 @@ class SyncIGDBMetadata(TestCase):
         )
         self.item.refresh_from_db()
         self.assertEqual(self.item.title, "Example Game Updated")
+
+    @patch("app.models.Item.fetch_releases")
+    @patch("app.views.cache.delete")
+    @patch("app.views.cache.ttl", return_value=0)
+    @patch("app.views.services.get_media_metadata")
+    def test_tmdb_movie_refresh_replaces_persisted_taxonomies(
+        self,
+        mock_get_metadata,
+        _mock_cache_ttl,
+        _mock_cache_delete,
+        _mock_fetch_releases,
+    ):
+        """Explicit TMDB refresh replaces stored genres and keywords."""
+        movie_item = Item.objects.create(
+            media_id="321",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.MOVIE.value,
+            title="Example Movie",
+            image="https://example.com/poster.jpg",
+        )
+        store_tmdb_movie_taxonomies(
+            movie_item,
+            {"genres": [{"id": 27, "name": "Horror"}], "keywords": []},
+        )
+        mock_get_metadata.return_value = {
+            "title": "Example Movie Updated",
+            "image": "https://example.com/new-poster.jpg",
+            "tmdb_taxonomies": {
+                "genres": [],
+                "keywords": [{"id": 1852, "name": "haunting"}],
+            },
+        }
+
+        self.client.post(
+            reverse(
+                "sync_metadata",
+                kwargs={
+                    "source": Sources.TMDB.value,
+                    "media_type": MediaTypes.MOVIE.value,
+                    "media_id": "321",
+                },
+            ),
+            {"next": "/"},
+        )
+
+        self.assertEqual(
+            list(
+                movie_item.tmdb_movie_metadata.taxonomies.values_list(
+                    "name",
+                    flat=True,
+                ),
+            ),
+            ["haunting"],
+        )

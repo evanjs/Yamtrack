@@ -190,6 +190,23 @@ def movie(media_id):
         except requests.exceptions.HTTPError as error:
             handle_error(error)
 
+        tmdb_taxonomies = None
+        try:
+            keywords_response = services.api_request(
+                Sources.TMDB.value,
+                "GET",
+                f"{base_url}/movie/{media_id}/keywords",
+                params=base_params,
+            )
+            tmdb_taxonomies = {
+                "genres": get_taxonomy_values(response["genres"]),
+                "keywords": get_taxonomy_values(keywords_response["keywords"]),
+            }
+        except requests.exceptions.RequestException as error:
+            logger.warning("Failed to get movie keywords: %s", error)
+        except (KeyError, TypeError) as error:
+            logger.warning("Invalid TMDB movie taxonomy response: %s", error)
+
         # Filter out collection items from recommendations, to avoid duplicates
         collection_items = get_collection(collection_response)
         collection_ids = [item["media_id"] for item in collection_items]
@@ -198,7 +215,9 @@ def movie(media_id):
             item for item in recommended_items if item["id"] not in collection_ids
         ]
 
-        cast = response.get("credits", {}).get("cast", [])
+        credits_response = response.get("credits", {})
+        cast = credits_response.get("cast", [])
+        crew = credits_response.get("crew", [])
         filtered_cast = [
             {
                 "id": member.get("id"),
@@ -244,7 +263,55 @@ def movie(media_id):
             ),
             "providers": response.get("watch/providers", {}).get("results", {}),
         }
+        if tmdb_taxonomies is not None:
+            data["tmdb_taxonomies"] = tmdb_taxonomies
+        if isinstance(credits_response, dict) and {"cast", "crew"}.issubset(
+            credits_response,
+        ):
+            data["tmdb_credits"] = {
+                "cast": get_credit_values(cast, credit_type="cast"),
+                "crew": get_credit_values(crew, credit_type="crew"),
+            }
 
+        cache.set(cache_key, data)
+
+    return data
+
+
+def movie_taxonomies(media_id):
+    """Fetch TMDB movie genres, keywords, and credits for bounded backfills."""
+    cache_key = f"tmdb_movie_metadata_v2_{media_id}"
+    data = cache.get(cache_key)
+
+    if data is None:
+        movie_response = services.api_request(
+            Sources.TMDB.value,
+            "GET",
+            f"{base_url}/movie/{media_id}",
+            params={**base_params, "append_to_response": "credits"},
+        )
+        keywords_response = services.api_request(
+            Sources.TMDB.value,
+            "GET",
+            f"{base_url}/movie/{media_id}/keywords",
+            params=base_params,
+        )
+        data = {
+            "tmdb_taxonomies": {
+                "genres": get_taxonomy_values(movie_response["genres"]),
+                "keywords": get_taxonomy_values(keywords_response["keywords"]),
+            },
+            "tmdb_credits": {
+                "cast": get_credit_values(
+                    movie_response["credits"]["cast"],
+                    credit_type="cast",
+                ),
+                "crew": get_credit_values(
+                    movie_response["credits"]["crew"],
+                    credit_type="crew",
+                ),
+            },
+        }
         cache.set(cache_key, data)
 
     return data
@@ -584,6 +651,34 @@ def get_genres(genres):
     if genres:
         return [genre["name"] for genre in genres]
     return None
+
+
+def get_taxonomy_values(values):
+    """Return TMDB taxonomy IDs and names without changing their identity."""
+    return [{"id": value["id"], "name": value["name"]} for value in values]
+
+
+def get_credit_values(values, *, credit_type):
+    """Normalize TMDB credits for relational storage without display assets."""
+    if credit_type == "cast":
+        return [
+            {
+                "id": value["id"],
+                "name": value["name"],
+                "character": value.get("character", ""),
+                "order": value.get("order"),
+            }
+            for value in values
+        ]
+    return [
+        {
+            "id": value["id"],
+            "name": value["name"],
+            "department": value.get("department", ""),
+            "job": value["job"],
+        }
+        for value in values
+    ]
 
 
 def get_country(countries):

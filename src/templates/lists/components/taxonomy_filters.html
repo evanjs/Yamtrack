@@ -1,0 +1,60 @@
+<form id="taxonomy-filter-form"
+      class="flex gap-2 flex-wrap"
+      hx-get="{% url 'list_detail' custom_list.id %}"
+      hx-trigger="change"
+      {% if items %}hx-target="#items-grid"{% else %}hx-target="this" hx-swap="none"{% endif %}
+      hx-include="#filter-form,#type-filter-controls"
+      hx-indicator="#loading-indicator">
+  {% for group in taxonomy_groups %}
+    <details class="relative" x-data="{ activeFacet: '{{ group.facets.0.name }}' }">
+      <summary class="h-10 flex items-center px-4 bg-[#39404b] rounded-md hover:bg-[#454d5a] transition-colors cursor-pointer list-none">{{ group.label }}</summary>
+      <div class="absolute left-0 z-20 mt-2 p-4 w-80 max-h-[70svh] overflow-y-auto bg-[#39404b] rounded-md shadow-lg border border-gray-700">
+        <div role="tablist" aria-label="{{ group.label }} facet types" class="flex gap-1 border-b border-gray-600">
+          {% for facet in group.facets %}
+            {% if facet.options %}
+              <button type="button" role="tab"
+                      id="{{ group.provider }}-taxonomy-tab-{{ facet.name }}"
+                      aria-controls="{{ group.provider }}-taxonomy-panel-{{ facet.name }}"
+                      :aria-selected="activeFacet === '{{ facet.name }}'"
+                      :tabindex="activeFacet === '{{ facet.name }}' ? 0 : -1"
+                      @click="activeFacet = '{{ facet.name }}'"
+                      class="px-2 py-2 text-sm font-medium border-b-2"
+                      :class="activeFacet === '{{ facet.name }}' ? 'border-indigo-400 text-white' : 'border-transparent text-gray-400 hover:text-white'">
+                {{ facet.name|title }}
+              </button>
+            {% endif %}
+          {% endfor %}
+        </div>
+        {% for facet in group.facets %}
+          {% if facet.options %}
+            <fieldset role="tabpanel"
+                      id="{{ group.provider }}-taxonomy-panel-{{ facet.name }}"
+                      aria-labelledby="{{ group.provider }}-taxonomy-tab-{{ facet.name }}"
+                      x-show="activeFacet === '{{ facet.name }}'"
+                      x-data="{ needle: '' }"
+                      class="pt-3">
+              <p class="text-xs text-gray-400 mb-2">Click to include (+), exclude (−), or ignore (·).</p>
+              <input type="search" x-model="needle"
+                     placeholder="Find {{ facet.name }}..."
+                     aria-label="Find {{ facet.name }}"
+                     class="w-full mb-2 px-2 py-1 rounded bg-[#2a2f35] text-white text-sm">
+              {% for option in facet.options %}
+                <div x-show="!needle || '{{ option.name|escapejs }}'.toLowerCase().includes(needle.toLowerCase())"
+                     class="flex items-center gap-2 py-1 text-sm text-gray-200" x-data="{ state: '{{ option.state }}' }">
+                  <input type="hidden" name="{{ group.provider }}_{{ facet.name }}" value="{{ option.provider_id }}" :disabled="state !== 'include'">
+                  <input type="hidden" name="{{ group.provider }}_{{ facet.name }}_exclude" value="{{ option.provider_id }}" :disabled="state !== 'exclude'">
+                  <button type="button" class="w-6 h-6 rounded border text-xs font-bold"
+                          :class="state === 'include' ? 'bg-indigo-600 border-indigo-400 text-white' : state === 'exclude' ? 'bg-red-900 border-red-400 text-white' : 'bg-[#2a2f35] border-gray-600 text-gray-400'"
+                          :aria-label="'{{ option.name|escapejs }}: ' + state + '. Click to change filter state.'"
+                          @click="state = state === 'neutral' ? 'include' : state === 'include' ? 'exclude' : 'neutral'; $nextTick(() => $dispatch('change'))"
+                          x-text="state === 'include' ? '+' : state === 'exclude' ? '−' : '·'"></button>
+                  <span>{{ option.name }}</span>
+                </div>
+              {% endfor %}
+            </fieldset>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </details>
+  {% endfor %}
+</form>

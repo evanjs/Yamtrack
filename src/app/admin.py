@@ -66,6 +66,11 @@ SpecialModels = [
     "IGDBGameMetadata",
     "IGDBGameTaxonomy",
     "IGDBGameTaxonomyAssignment",
+    "TMDBMovieMetadata",
+    "TMDBMovieTaxonomy",
+    "TMDBMovieTaxonomyAssignment",
+    "TMDBMovieCredit",
+    "TMDBMovieCreditAssignment",
 ]
 for model in app_models:
     if (

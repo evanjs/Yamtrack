@@ -406,6 +406,230 @@ class Metadata(TestCase):
         self.assertEqual(response["details"]["release_date"], "1998-02-28")
         self.assertEqual(response["details"]["status"], "Released")
 
+    @patch("app.providers.tmdb.cache.set")
+    @patch("app.providers.tmdb.cache.get", return_value=None)
+    @patch("app.providers.tmdb.services.api_request")
+    def test_movie_normalizes_tmdb_credit_people_and_roles(
+        self,
+        mock_api_request,
+        _mock_cache_get,
+        _mock_cache_set,
+    ):
+        """The main movie response retains person IDs and role details."""
+        mock_api_request.side_effect = [
+            {
+                "id": 321,
+                "title": "Example Movie",
+                "poster_path": None,
+                "overview": "An example.",
+                "genres": [],
+                "credits": {
+                    "cast": [
+                        {
+                            "id": 10,
+                            "name": "Cast Member",
+                            "character": "Lead",
+                            "order": 0,
+                        },
+                    ],
+                    "crew": [
+                        {
+                            "id": 11,
+                            "name": "Director",
+                            "department": "Directing",
+                            "job": "Director",
+                        },
+                    ],
+                },
+                "vote_average": 7.0,
+                "vote_count": 100,
+                "recommendations": {"results": []},
+                "release_date": "2024-01-01",
+                "status": "Released",
+                "runtime": 90,
+                "production_companies": [],
+                "production_countries": [],
+                "spoken_languages": [],
+            },
+            {"keywords": []},
+        ]
+
+        metadata = tmdb.movie("321")
+
+        self.assertEqual(
+            metadata["tmdb_credits"],
+            {
+                "cast": [
+                    {"id": 10, "name": "Cast Member", "character": "Lead", "order": 0},
+                ],
+                "crew": [
+                    {
+                        "id": 11,
+                        "name": "Director",
+                        "department": "Directing",
+                        "job": "Director",
+                    },
+                ],
+            },
+        )
+        self.assertIn(
+            "credits",
+            mock_api_request.call_args_list[0].kwargs["params"]["append_to_response"],
+        )
+
+    @patch("app.providers.tmdb.cache.set")
+    @patch("app.providers.tmdb.cache.get", return_value=None)
+    @patch("app.providers.tmdb.services.api_request")
+    def test_movie_retains_genre_and_keyword_ids(
+        self,
+        mock_api_request,
+        _mock_cache_get,
+        _mock_cache_set,
+    ):
+        """Movie metadata retains TMDB taxonomy IDs for durable filters."""
+        mock_api_request.side_effect = [
+            {
+                "id": 321,
+                "title": "Example Horror",
+                "poster_path": None,
+                "overview": "An example.",
+                "genres": [{"id": 27, "name": "Horror"}],
+                "vote_average": 7.0,
+                "vote_count": 100,
+                "recommendations": {"results": []},
+                "release_date": "2024-01-01",
+                "status": "Released",
+                "runtime": 90,
+                "production_companies": [],
+                "production_countries": [],
+                "spoken_languages": [],
+            },
+            {
+                "id": 321,
+                "keywords": [{"id": 1852, "name": "insidious"}],
+            },
+        ]
+
+        metadata = tmdb.movie("321")
+
+        self.assertEqual(
+            metadata["tmdb_taxonomies"],
+            {
+                "genres": [{"id": 27, "name": "Horror"}],
+                "keywords": [{"id": 1852, "name": "insidious"}],
+            },
+        )
+        self.assertEqual(mock_api_request.call_count, 2)
+        self.assertEqual(
+            mock_api_request.call_args_list[1].args[2],
+            f"{tmdb.base_url}/movie/321/keywords",
+        )
+
+    @patch("app.providers.tmdb.cache.set")
+    @patch("app.providers.tmdb.cache.get", return_value=None)
+    @patch("app.providers.tmdb.services.api_request")
+    def test_movie_taxonomies_uses_a_narrow_provider_request(
+        self,
+        mock_api_request,
+        _mock_cache_get,
+        _mock_cache_set,
+    ):
+        """Backfill fetches only movie details and keywords, not full metadata."""
+        mock_api_request.side_effect = [
+            {
+                "genres": [{"id": 27, "name": "Horror"}],
+                "credits": {
+                    "cast": [
+                        {
+                            "id": 10,
+                            "name": "Cast Member",
+                            "character": "Lead",
+                            "order": 0,
+                        }
+                    ],
+                    "crew": [
+                        {
+                            "id": 11,
+                            "name": "Director",
+                            "department": "Directing",
+                            "job": "Director",
+                        }
+                    ],
+                },
+            },
+            {"keywords": [{"id": 1852, "name": "haunting"}]},
+        ]
+
+        metadata = tmdb.movie_taxonomies("321")
+
+        self.assertEqual(
+            metadata,
+            {
+                "tmdb_taxonomies": {
+                    "genres": [{"id": 27, "name": "Horror"}],
+                    "keywords": [{"id": 1852, "name": "haunting"}],
+                },
+                "tmdb_credits": {
+                    "cast": [
+                        {
+                            "id": 10,
+                            "name": "Cast Member",
+                            "character": "Lead",
+                            "order": 0,
+                        }
+                    ],
+                    "crew": [
+                        {
+                            "id": 11,
+                            "name": "Director",
+                            "department": "Directing",
+                            "job": "Director",
+                        }
+                    ],
+                },
+            },
+        )
+        self.assertEqual(mock_api_request.call_count, 2)
+        self.assertEqual(
+            mock_api_request.call_args_list[0].kwargs["params"]["append_to_response"],
+            "credits",
+        )
+
+    @patch("app.providers.tmdb.cache.set")
+    @patch("app.providers.tmdb.cache.get", return_value=None)
+    @patch("app.providers.tmdb.services.api_request")
+    def test_movie_keyword_timeout_preserves_primary_movie_metadata(
+        self,
+        mock_api_request,
+        _mock_cache_get,
+        _mock_cache_set,
+    ):
+        """A keyword timeout must not fail the movie-details response."""
+        mock_api_request.side_effect = [
+            {
+                "id": 321,
+                "title": "Example Horror",
+                "poster_path": None,
+                "overview": "An example.",
+                "genres": [{"id": 27, "name": "Horror"}],
+                "vote_average": 7.0,
+                "vote_count": 100,
+                "recommendations": {"results": []},
+                "release_date": "2024-01-01",
+                "status": "Released",
+                "runtime": 90,
+                "production_companies": [],
+                "production_countries": [],
+                "spoken_languages": [],
+            },
+            requests.Timeout("keywords timed out"),
+        ]
+
+        metadata = tmdb.movie("321")
+
+        self.assertEqual(metadata["title"], "Example Horror")
+        self.assertNotIn("tmdb_taxonomies", metadata)
+
     @patch("requests.Session.get")
     def test_movie_unknown(self, mock_data):
         """Test the metadata method for movies with mostly unknown data."""

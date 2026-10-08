@@ -20,7 +20,12 @@ from app import config, helpers, history_processor
 from app import home as home_helpers
 from app import statistics as stats
 from app.forms import EpisodeForm, ManualItemForm, get_form_class
-from app.metadata import store_igdb_game_taxonomies
+from app.metadata import (
+    mark_tmdb_movie_taxonomy_attempt,
+    store_igdb_game_taxonomies,
+    store_tmdb_movie_credits,
+    store_tmdb_movie_taxonomies,
+)
 from app.models import (
     TV,
     BasicMedia,
@@ -28,10 +33,15 @@ from app.models import (
     IGDBGameTaxonomy,
     Item,
     MediaTypes,
+    Movie,
     Season,
     Sources,
     Status,
+    TMDBMovieCredit,
+    TMDBMovieCreditAssignment,
+    TMDBMovieTaxonomy,
     UserMessage,
+    tmdb_metadata_expiry_cutoff,
 )
 from app.providers import manual, services, tmdb
 from app.templatetags import app_tags
@@ -45,6 +55,7 @@ from users.models import (
 )
 
 logger = logging.getLogger(__name__)
+TMDB_CREDIT_SEARCH_MIN_LENGTH = 2
 
 
 def _persist_igdb_taxonomies_for_item(item, metadata):
@@ -61,31 +72,186 @@ def _persist_igdb_taxonomies_for_item(item, metadata):
         )
 
 
+def _persist_tmdb_taxonomies_for_item(item, metadata):
+    """Persist successful TMDB facets or record a failed/incomplete attempt."""
+    if item.source != Sources.TMDB.value or item.media_type != MediaTypes.MOVIE.value:
+        return
+    if "tmdb_taxonomies" in metadata:
+        store_tmdb_movie_taxonomies(item, metadata["tmdb_taxonomies"])
+    else:
+        mark_tmdb_movie_taxonomy_attempt(item)
+    if "tmdb_credits" in metadata:
+        store_tmdb_movie_credits(item, metadata["tmdb_credits"])
+
+
 IGDB_TAXONOMY_KIND_BY_PARAMETER = {
     "genre": IGDBGameTaxonomy.Kind.GENRE,
     "theme": IGDBGameTaxonomy.Kind.THEME,
     "keyword": IGDBGameTaxonomy.Kind.KEYWORD,
 }
+TMDB_TAXONOMY_KIND_BY_PARAMETER = {
+    "genre": TMDBMovieTaxonomy.Kind.GENRE,
+    "keyword": TMDBMovieTaxonomy.Kind.KEYWORD,
+}
 
 
 def get_igdb_game_taxonomy_filters(query_params):
-    """Parse repeated IGDB taxonomy IDs and map active kinds for the queryset."""
+    """Parse repeated included/excluded IGDB taxonomy IDs."""
+    return get_provider_taxonomy_filters(query_params, IGDB_TAXONOMY_KIND_BY_PARAMETER)
+
+
+def get_tmdb_movie_taxonomy_filters(query_params):
+    """Parse repeated included/excluded TMDB movie taxonomy IDs."""
+    return get_provider_taxonomy_filters(query_params, TMDB_TAXONOMY_KIND_BY_PARAMETER)
+
+
+def get_tmdb_movie_credit_filters(query_params):
+    """Parse repeated TMDB credit role/person pairs and their match mode."""
+    roles = query_params.getlist("credit_role")
+    person_ids = query_params.getlist("credit_person")
+    filters = []
+    seen = set()
+    for role, raw_person_id in zip(roles, person_ids, strict=False):
+        normalized_role = normalize_tmdb_credit_role(role)
+        try:
+            person_id = int(raw_person_id)
+        except (TypeError, ValueError):
+            continue
+        if person_id <= 0 or not normalized_role:
+            continue
+        key = (normalized_role, person_id)
+        if key not in seen:
+            filters.append({"role": normalized_role, "person_id": person_id})
+            seen.add(key)
+    match = query_params.get("credit_match", "any")
+    return filters, match if match in {"any", "all"} else "any"
+
+
+def normalize_tmdb_credit_role(role):
+    """Normalize the Cast/Crew catch-all values while preserving TMDB jobs."""
+    role = role.strip()
+    return role.casefold() if role.casefold() in {"cast", "crew"} else role
+
+
+def get_tmdb_movie_credit_roles(target_user):
+    """Return TMDB credit roles represented in a user's tracked movie library."""
+    jobs = (
+        TMDBMovieCreditAssignment.objects.filter(
+            metadata__item__movie__user=target_user,
+            metadata__credits_synced_at__gte=tmdb_metadata_expiry_cutoff(),
+            credit_type=TMDBMovieCreditAssignment.CreditType.CREW,
+        )
+        .values_list("job", flat=True)
+        .distinct()
+        .order_by("job")
+    )
+    choices = [
+        ("cast", "Cast"),
+        ("crew", "Crew"),
+        ("Director", "Director"),
+        ("Writer", "Writer"),
+        ("Screenplay", "Screenplay"),
+        ("Composer", "Composer"),
+        ("Producer", "Producer"),
+    ]
+    known_roles = {value for value, _ in choices}
+    choices.extend((job, job) for job in jobs if job not in known_roles)
+    return choices
+
+
+def get_tmdb_movie_credit_filter_context(target_user, media_type, query_params):
+    """Build role/person filter state and choices for one movie list page."""
+    if media_type != MediaTypes.MOVIE.value:
+        return [], "any", []
+    credit_filters, credit_match = get_tmdb_movie_credit_filters(query_params)
+    credit_roles = get_tmdb_movie_credit_roles(target_user)
+    selected_people = {
+        person.provider_id: person.name
+        for person in TMDBMovieCredit.objects.filter(
+            provider_id__in=[entry["person_id"] for entry in credit_filters],
+        )
+    }
+    for credit_filter in credit_filters:
+        credit_filter["role_label"] = dict(credit_roles).get(
+            credit_filter["role"],
+            credit_filter["role"],
+        )
+        credit_filter["person_name"] = selected_people.get(
+            credit_filter["person_id"],
+            "",
+        )
+    return credit_filters, credit_match, credit_roles
+
+
+@login_not_required
+@require_GET
+def tmdb_movie_credit_search(request, username):
+    """Search people credited in a visible user's tracked movie library."""
+    target_user = get_object_or_404(User, username=username)
+    if target_user.profile_private and request.user != target_user:
+        raise Http404
+
+    query = request.GET.get("q", "").strip()
+    if len(query) < TMDB_CREDIT_SEARCH_MIN_LENGTH:
+        return JsonResponse({"results": []})
+
+    assignments = TMDBMovieCreditAssignment.objects.filter(
+        metadata__item_id__in=Movie.objects.filter(user=target_user).values("item_id"),
+        metadata__credits_synced_at__gte=tmdb_metadata_expiry_cutoff(),
+    )
+    role = normalize_tmdb_credit_role(request.GET.get("role", ""))
+    if role == "cast":
+        assignments = assignments.filter(
+            credit_type=TMDBMovieCreditAssignment.CreditType.CAST,
+        )
+    elif role == "crew":
+        assignments = assignments.filter(
+            credit_type=TMDBMovieCreditAssignment.CreditType.CREW,
+        )
+    elif role:
+        assignments = assignments.filter(
+            credit_type=TMDBMovieCreditAssignment.CreditType.CREW,
+            job=role,
+        )
+    people = (
+        TMDBMovieCredit.objects.filter(
+            movie_assignments__in=assignments,
+            name__icontains=query,
+        )
+        .distinct()
+        .order_by("name")[:12]
+    )
+    return JsonResponse(
+        {
+            "results": [
+                {"id": person.provider_id, "name": person.name} for person in people
+            ],
+        },
+    )
+
+
+def get_provider_taxonomy_filters(query_params, kind_by_parameter):
+    """Parse repeated included/excluded taxonomy IDs for one provider."""
     current_filters = {}
-    for parameter in IGDB_TAXONOMY_KIND_BY_PARAMETER:
-        selected_ids = []
-        for value in query_params.getlist(parameter):
-            try:
-                provider_id = int(value)
-            except ValueError:
-                continue
-            if provider_id > 0 and provider_id not in selected_ids:
-                selected_ids.append(provider_id)
-        current_filters[parameter] = selected_ids
+    for parameter in kind_by_parameter:
+        current_filters[parameter] = {"include": [], "exclude": []}
+        for selection, query_key in (
+            ("include", parameter),
+            ("exclude", f"{parameter}_exclude"),
+        ):
+            selected_ids = current_filters[parameter][selection]
+            for value in query_params.getlist(query_key):
+                try:
+                    provider_id = int(value)
+                except ValueError:
+                    continue
+                if provider_id > 0 and provider_id not in selected_ids:
+                    selected_ids.append(provider_id)
 
     active_filters = {
-        IGDB_TAXONOMY_KIND_BY_PARAMETER[parameter]: provider_ids
-        for parameter, provider_ids in current_filters.items()
-        if provider_ids
+        kind_by_parameter[parameter]: selections
+        for parameter, selections in current_filters.items()
+        if selections["include"] or selections["exclude"]
     }
     return current_filters, active_filters
 
@@ -100,7 +266,13 @@ def get_igdb_game_taxonomy_options(user, media_type, current_filters):
             {
                 "provider_id": taxonomy.provider_id,
                 "name": taxonomy.name,
-                "selected": taxonomy.provider_id in current_filters[parameter],
+                "state": (
+                    "include"
+                    if taxonomy.provider_id in current_filters[parameter]["include"]
+                    else "exclude"
+                    if taxonomy.provider_id in current_filters[parameter]["exclude"]
+                    else "neutral"
+                ),
             }
             for taxonomy in IGDBGameTaxonomy.objects.filter(
                 kind=kind,
@@ -111,6 +283,37 @@ def get_igdb_game_taxonomy_options(user, media_type, current_filters):
             .order_by("name")
         ]
         for parameter, kind in IGDB_TAXONOMY_KIND_BY_PARAMETER.items()
+    }
+
+
+def get_tmdb_movie_taxonomy_options(user, media_type, current_filters):
+    """Return TMDB facets represented in one user's tracked movie library."""
+    if media_type != MediaTypes.MOVIE.value:
+        return {}
+
+    return {
+        parameter: [
+            {
+                "provider_id": taxonomy.provider_id,
+                "name": taxonomy.name,
+                "state": (
+                    "include"
+                    if taxonomy.provider_id in current_filters[parameter]["include"]
+                    else "exclude"
+                    if taxonomy.provider_id in current_filters[parameter]["exclude"]
+                    else "neutral"
+                ),
+            }
+            for taxonomy in TMDBMovieTaxonomy.objects.filter(
+                kind=kind,
+                movie_assignments__metadata__item__source=Sources.TMDB.value,
+                movie_assignments__metadata__item__movie__user=user,
+                movie_assignments__metadata__synced_at__gte=tmdb_metadata_expiry_cutoff(),
+            )
+            .distinct()
+            .order_by("name")
+        ]
+        for parameter, kind in TMDB_TAXONOMY_KIND_BY_PARAMETER.items()
     }
 
 
@@ -227,6 +430,29 @@ def progress_edit(request, media_type, instance_id):
     )
 
 
+def get_media_taxonomy_filter_context(target_user, media_type, query_params):
+    """Return taxonomy labels, filters, and options for one supported media type."""
+    if media_type == MediaTypes.GAME.value:
+        current_filters, active_filters = get_igdb_game_taxonomy_filters(query_params)
+        options = get_igdb_game_taxonomy_options(
+            target_user,
+            media_type,
+            current_filters,
+        )
+        return "IGDB", current_filters, active_filters, options
+
+    if media_type == MediaTypes.MOVIE.value:
+        current_filters, active_filters = get_tmdb_movie_taxonomy_filters(query_params)
+        options = get_tmdb_movie_taxonomy_options(
+            target_user,
+            media_type,
+            current_filters,
+        )
+        return "TMDB", current_filters, active_filters, options
+
+    return "", {}, {}, {}
+
+
 @login_not_required
 @require_GET
 def media_list(request, username, media_type):
@@ -280,8 +506,16 @@ def media_list(request, username, media_type):
 
     search_query = request.GET.get("search", "")
     page = request.GET.get("page", 1)
-    current_taxonomy_filters, active_taxonomy_filters = (
-        get_igdb_game_taxonomy_filters(request.GET)
+    (
+        taxonomy_label,
+        current_taxonomy_filters,
+        active_taxonomy_filters,
+        taxonomy_options,
+    ) = get_media_taxonomy_filter_context(target_user, media_type, request.GET)
+    credit_filters, credit_match, credit_roles = get_tmdb_movie_credit_filter_context(
+        target_user,
+        media_type,
+        request.GET,
     )
 
     # Prepare status filter for database query
@@ -296,12 +530,13 @@ def media_list(request, username, media_type):
         sort_filter=sort_filter,
         search=search_query,
         taxonomy_filters=active_taxonomy_filters or None,
-    )
-
-    taxonomy_options = get_igdb_game_taxonomy_options(
-        target_user,
-        media_type,
-        current_taxonomy_filters,
+        credit_filters=credit_filters or None,
+        credit_match=credit_match,
+        include_unknown_taxonomy=getattr(
+            request.user,
+            "include_unknown_taxonomy",
+            False,
+        ),
     )
 
     # Paginate results
@@ -312,6 +547,13 @@ def media_list(request, username, media_type):
     BasicMedia.objects.annotate_max_progress(
         media_page.object_list,
         media_type,
+    )
+    taxonomy_selected_counts = {"genre": 0, "theme": 0, "keyword": 0}
+    taxonomy_selected_counts.update(
+        {
+            facet: len(selections["include"]) + len(selections["exclude"])
+            for facet, selections in current_taxonomy_filters.items()
+        },
     )
 
     context = {
@@ -327,7 +569,13 @@ def media_list(request, username, media_type):
         "target_user": target_user,
         "taxonomy_options": taxonomy_options,
         "has_taxonomy_options": any(taxonomy_options.values()),
+        "taxonomy_label": taxonomy_label,
         "current_taxonomy_filters": current_taxonomy_filters,
+        "taxonomy_selected_counts": taxonomy_selected_counts,
+        "credit_filters": credit_filters,
+        "credit_match": credit_match,
+        "credit_roles": credit_roles,
+        "has_credit_options": bool(credit_roles),
     }
 
     # Handle HTMX requests for partial updates. Soft-navigation requests (e.g.
@@ -565,6 +813,7 @@ def sync_metadata(request, source, media_type, media_id, season_number=None):
             },
         )
         _persist_igdb_taxonomies_for_item(item, metadata)
+        _persist_tmdb_taxonomies_for_item(item, metadata)
         title = metadata["title"]
         if season_number:
             title += f" - Season {season_number}"
@@ -729,6 +978,7 @@ def media_save(request):
             },
         )
         _persist_igdb_taxonomies_for_item(item, metadata)
+        _persist_tmdb_taxonomies_for_item(item, metadata)
         model = apps.get_model(app_label="app", model_name=media_type)
         instance = model(item=item, user=request.user)
 

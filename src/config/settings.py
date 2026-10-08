@@ -590,6 +590,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "Cleanup user messages",
         "schedule": 60 * 60 * 24,  # every 24 hours
     },
+    "refresh_tmdb_movie_taxonomies": {
+        "task": "Refresh due TMDB movie taxonomies",
+        "schedule": 60 * 60,  # every hour; each run fetches a bounded batch
+    },
+    "cleanup_expired_tmdb_movie_taxonomies": {
+        "task": "Cleanup expired TMDB movie taxonomies",
+        "schedule": 60 * 60 * 24,  # every 24 hours
+    },
 }
 
 IS_PROD = not any(cmd in sys.argv for cmd in ("runserver", "test"))

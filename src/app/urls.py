@@ -8,6 +8,11 @@ register_converter(converters.SourceChecker, "source")
 
 urlpatterns = [
     path("", views.home, name="home"),
+    path(
+        "<str:username>/credits/search",
+        views.tmdb_movie_credit_search,
+        name="tmdb_movie_credit_search",
+    ),
     path("<str:username>/<media_type:media_type>", views.media_list, name="medialist"),
     path("search", views.media_search, name="search"),
     path(
