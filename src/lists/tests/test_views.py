@@ -380,6 +380,10 @@ class ListDetailViewTests(TestCase):
         self.assertContains(response, "Movie filters")
         self.assertContains(response, "Horror")
         self.assertContains(response, "Fantasy")
+        self.assertContains(response, 'aria-label="Game filters facet types"')
+        self.assertContains(response, 'aria-label="Movie filters facet types"')
+        self.assertContains(response, 'role="tabpanel"')
+        self.assertContains(response, 'placeholder="Find genre..."')
 
     def test_list_detail_type_multiselect_can_hide_media_types(self):
         """Explicit type selection limits visible list items to selected types."""
