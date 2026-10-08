@@ -1,13 +1,16 @@
 import datetime
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from app.metadata import store_igdb_game_taxonomies
 from app.models import (
     TV,
     Anime,
     Episode,
+    IGDBGameMetadata,
     Item,
     MediaTypes,
     Movie,
@@ -78,6 +81,38 @@ class CreateMedia(TestCase):
         self.assertEqual(
             TV.objects.filter(item__media_id="5895", user=self.user).exists(),
             True,
+        )
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_create_igdb_game_persists_taxonomies(self, mock_get_metadata):
+        """Newly tracked IGDB games save their taxonomy metadata."""
+        mock_get_metadata.return_value = {
+            "title": "Example Game",
+            "image": "https://example.com/cover.jpg",
+            "max_progress": None,
+            "igdb_taxonomies": {
+                "genres": [{"id": 4, "name": "Fighting"}],
+                "themes": [],
+                "keywords": [{"id": 99, "name": "co-op"}],
+            },
+            "igdb_updated_at": None,
+        }
+
+        self.client.post(
+            reverse("media_save"),
+            {
+                "media_id": "123",
+                "source": Sources.IGDB.value,
+                "media_type": MediaTypes.GAME.value,
+                "status": Status.PLANNING.value,
+                "progress": "",
+            },
+        )
+
+        metadata = IGDBGameMetadata.objects.get(item__media_id="123")
+        self.assertCountEqual(
+            metadata.taxonomies.values_list("name", flat=True),
+            ["Fighting", "co-op"],
         )
 
     def test_create_season(self):
@@ -358,3 +393,70 @@ class DeleteMedia(TestCase):
             Episode.objects.filter(related_season__user=self.user).count(),
             0,
         )
+
+
+class SyncIGDBMetadata(TestCase):
+    """Test persisting IGDB taxonomy on explicit provider refresh."""
+
+    def setUp(self):
+        """Create a logged-in user and an existing IGDB game."""
+        self.user = get_user_model().objects.create_user(username="sync-igdb")
+        self.client.force_login(self.user)
+        self.item = Item.objects.create(
+            media_id="123",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Example Game",
+            image="https://example.com/old.jpg",
+        )
+        store_igdb_game_taxonomies(
+            self.item,
+            {
+                "genres": [{"id": 4, "name": "Fighting"}],
+                "themes": [],
+                "keywords": [],
+            },
+        )
+
+    @patch("app.models.Item.fetch_releases")
+    @patch("app.views.cache.delete")
+    @patch("app.views.cache.ttl", return_value=0)
+    @patch("app.views.services.get_media_metadata")
+    def test_successful_refresh_replaces_persisted_taxonomies(
+        self,
+        mock_get_metadata,
+        _mock_cache_ttl,
+        _mock_cache_delete,
+        _mock_fetch_releases,
+    ):
+        """Explicit IGDB refresh replaces old facets after provider success."""
+        mock_get_metadata.return_value = {
+            "title": "Example Game Updated",
+            "image": "https://example.com/new.jpg",
+            "igdb_taxonomies": {
+                "genres": [],
+                "themes": [{"id": 17, "name": "Fantasy"}],
+                "keywords": [{"id": 99, "name": "co-op"}],
+            },
+            "igdb_updated_at": None,
+        }
+
+        self.client.post(
+            reverse(
+                "sync_metadata",
+                kwargs={
+                    "source": Sources.IGDB.value,
+                    "media_type": MediaTypes.GAME.value,
+                    "media_id": "123",
+                },
+            ),
+            {"next": "/"},
+        )
+
+        metadata = IGDBGameMetadata.objects.get(item=self.item)
+        self.assertCountEqual(
+            metadata.taxonomies.values_list("name", flat=True),
+            ["Fantasy", "co-op"],
+        )
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.title, "Example Game Updated")

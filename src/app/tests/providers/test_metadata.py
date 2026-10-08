@@ -455,6 +455,132 @@ class Metadata(TestCase):
         self.assertEqual(igdb.get_steam_app_id(response), "292030")
         self.assertIsNone(igdb.get_steam_app_id({}))
 
+    @patch("app.providers.igdb.cache.set")
+    @patch("app.providers.igdb.cache.get", return_value=None)
+    @patch("app.providers.igdb.services.api_request")
+    @patch("app.providers.igdb.get_access_token", return_value="test-token")
+    def test_game_returns_taxonomy_ids_and_names(
+        self,
+        _mock_access_token,
+        mock_api_request,
+        _mock_cache_get,
+        _mock_cache_set,
+    ):
+        """Game metadata retains IGDB IDs for filterable taxonomy values."""
+        mock_api_request.return_value = [
+            {
+                "name": "GameData",
+                "result": [
+                    {
+                        "id": 123,
+                        "name": "Example Game",
+                        "url": "https://www.igdb.com/games/example-game",
+                        "game_type": 0,
+                        "updated_at": 1735689600,
+                        "genres": [{"id": 4, "name": "Fighting"}],
+                        "themes": [{"id": 17, "name": "Fantasy"}],
+                        "keywords": [{"id": 99, "name": "co-op"}],
+                        "external_games": [],
+                    },
+                ],
+            },
+            {"name": "TTBData", "result": []},
+        ]
+
+        metadata = igdb.game("123")
+
+        self.assertEqual(
+            metadata["igdb_taxonomies"],
+            {
+                "genres": [{"id": 4, "name": "Fighting"}],
+                "themes": [{"id": 17, "name": "Fantasy"}],
+                "keywords": [{"id": 99, "name": "co-op"}],
+            },
+        )
+        self.assertEqual(metadata["genres"], ["Fighting"])
+        self.assertEqual(metadata["details"]["themes"], ["Fantasy"])
+        self.assertIsNotNone(metadata["igdb_updated_at"])
+
+        query = mock_api_request.call_args.kwargs["data"]
+        self.assertIn("genres.id,genres.name", query)
+        self.assertIn("themes.id,themes.name", query)
+        self.assertIn("keywords.id,keywords.name", query)
+        self.assertIn("updated_at", query)
+
+    @patch("app.providers.igdb.cache.set")
+    @patch("app.providers.igdb.cache.get", return_value=None)
+    @patch("app.providers.igdb.services.api_request")
+    @patch("app.providers.igdb.get_access_token", return_value="test-token")
+    def test_game_taxonomies_uses_narrow_request(
+        self,
+        _mock_access_token,
+        mock_api_request,
+        _mock_cache_get,
+        _mock_cache_set,
+    ):
+        """Taxonomy backfill request omits unrelated game detail fields."""
+        mock_api_request.return_value = [
+            {
+                "id": 123,
+                "updated_at": 1735689600,
+                "genres": [{"id": 4, "name": "Fighting"}],
+                "themes": [],
+                "keywords": [{"id": 99, "name": "co-op"}],
+            },
+        ]
+
+        result = igdb.game_taxonomies("123")
+
+        self.assertEqual(
+            result["igdb_taxonomies"]["genres"],
+            [{"id": 4, "name": "Fighting"}],
+        )
+        query = mock_api_request.call_args.kwargs["data"]
+        self.assertIn("genres.id,genres.name", query)
+        self.assertIn("themes.id,themes.name", query)
+        self.assertIn("keywords.id,keywords.name", query)
+        self.assertNotIn("screenshots", query)
+        self.assertNotIn("game_time_to_beats", query)
+
+    @patch("app.providers.igdb.cache.delete")
+    @patch("app.providers.igdb.cache.set")
+    @patch("app.providers.igdb.cache.get", return_value={"title": "Old cache"})
+    @patch("app.providers.igdb.services.api_request")
+    @patch("app.providers.igdb.get_access_token", return_value="test-token")
+    def test_game_refetches_old_cache_values_without_taxonomies(
+        self,
+        _mock_access_token,
+        mock_api_request,
+        _mock_cache_get,
+        _mock_cache_set,
+        mock_cache_delete,
+    ):
+        """A pre-facet cached payload is invalidated on first use after upgrade."""
+        mock_api_request.return_value = [
+            {
+                "name": "GameData",
+                "result": [
+                    {
+                        "id": 123,
+                        "name": "Example Game",
+                        "url": "https://www.igdb.com/games/example-game",
+                        "game_type": 0,
+                        "genres": [],
+                        "themes": [],
+                        "keywords": [],
+                        "external_games": [],
+                    },
+                ],
+            },
+            {"name": "TTBData", "result": []},
+        ]
+
+        metadata = igdb.game("123")
+
+        self.assertIn("igdb_taxonomies", metadata)
+        mock_cache_delete.assert_called_once_with("igdb_game_123")
+        mock_api_request.assert_called_once()
+
     @patch("app.providers.igdb.services.api_request")
     def test_get_steam_screenshot_urls(self, mock_api_request):
         """Test fetching and caching Steam Store screenshots."""

@@ -12,8 +12,10 @@ from django.db import models
 from django.db.models import (
     CheckConstraint,
     Count,
+    Exists,
     F,
     Max,
+    OuterRef,
     Prefetch,
     Q,
     UniqueConstraint,
@@ -216,6 +218,86 @@ class Item(CalendarTriggerMixin, models.Model):
             events.tasks.reload_calendar(items_to_process=items_to_process)
 
 
+class IGDBGameTaxonomy(models.Model):
+    """IGDB taxonomy value with identity distinct by facet kind."""
+
+    class Kind(models.TextChoices):
+        """Taxonomy families exposed by the IGDB game provider."""
+
+        GENRE = "genre", "Genre"
+        THEME = "theme", "Theme"
+        KEYWORD = "keyword", "Keyword"
+
+    kind = models.CharField(max_length=12, choices=Kind)
+    provider_id = models.PositiveBigIntegerField()
+    name = models.TextField()
+    slug = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        """Model options for IGDB taxonomy values."""
+
+        constraints = [
+            UniqueConstraint(
+                fields=["kind", "provider_id"],
+                name="unique_igdb_taxonomy_kind_id",
+            ),
+        ]
+
+    def __str__(self):
+        """Return the taxonomy label."""
+        return self.name
+
+
+class IGDBGameMetadata(models.Model):
+    """Persist shared IGDB metadata for a Yamtrack game Item."""
+
+    item = models.OneToOneField(
+        Item,
+        on_delete=models.CASCADE,
+        related_name="igdb_game_metadata",
+    )
+    synced_at = models.DateTimeField(default=timezone.now)
+    provider_updated_at = models.DateTimeField(null=True, blank=True)
+    taxonomies = models.ManyToManyField(
+        IGDBGameTaxonomy,
+        through="IGDBGameTaxonomyAssignment",
+        related_name="game_metadata",
+    )
+
+    def __str__(self):
+        """Return the associated game Item's title."""
+        return f"IGDB metadata for {self.item}"
+
+
+class IGDBGameTaxonomyAssignment(models.Model):
+    """Associate an IGDB taxonomy value with a shared game metadata record."""
+
+    metadata = models.ForeignKey(
+        IGDBGameMetadata,
+        on_delete=models.CASCADE,
+        related_name="taxonomy_assignments",
+    )
+    taxonomy = models.ForeignKey(
+        IGDBGameTaxonomy,
+        on_delete=models.CASCADE,
+        related_name="game_assignments",
+    )
+
+    class Meta:
+        """Model options for IGDB taxonomy associations."""
+
+        constraints = [
+            UniqueConstraint(
+                fields=["metadata", "taxonomy"],
+                name="unique_igdb_game_taxonomy_assignment",
+            ),
+        ]
+
+    def __str__(self):
+        """Return the assigned taxonomy label and game Item."""
+        return f"{self.metadata.item} — {self.taxonomy.kind}: {self.taxonomy.name}"
+
+
 class MediaManager(models.Manager):
     """Custom manager for media models."""
 
@@ -223,13 +305,34 @@ class MediaManager(models.Manager):
         """Return list of historical model names."""
         return [f"historical{media_type}" for media_type in MediaTypes.values]
 
-    def get_media_list(self, user, media_type, status_filter, sort_filter, search=None):
+    def get_media_list(
+        self,
+        user,
+        media_type,
+        status_filter,
+        sort_filter,
+        search=None,
+        taxonomy_filters=None,
+    ):
         """Get media list based on filters, sorting and search."""
         model = apps.get_model(app_label="app", model_name=media_type)
         queryset = model.objects.filter(user=user.id)
 
         if status_filter != users.models.MediaStatusChoices.ALL:
             queryset = queryset.filter(status=status_filter)
+
+        if taxonomy_filters and media_type == MediaTypes.GAME.value:
+            for kind, provider_ids in taxonomy_filters.items():
+                if not provider_ids:
+                    continue
+                matching_taxonomies = IGDBGameTaxonomyAssignment.objects.filter(
+                    metadata__item_id=OuterRef("item_id"),
+                    metadata__item__source=Sources.IGDB.value,
+                    metadata__item__media_type=MediaTypes.GAME.value,
+                    taxonomy__kind=kind,
+                    taxonomy__provider_id__in=provider_ids,
+                )
+                queryset = queryset.filter(Exists(matching_taxonomies))
 
         if search:
             search_filter = Q(item__title__icontains=search)

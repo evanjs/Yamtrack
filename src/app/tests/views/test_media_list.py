@@ -2,7 +2,9 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from app.metadata import store_igdb_game_taxonomies
 from app.models import (
+    Game,
     Item,
     MediaTypes,
     Movie,
@@ -95,6 +97,59 @@ class MediaListViewTests(TestCase):
         self.assertEqual(self.user.movie_status, Status.COMPLETED.value)
         self.assertEqual(self.user.movie_sort, "score")
         self.assertEqual(self.user.movie_layout, "table")
+
+    def test_game_list_filters_by_repeated_igdb_taxonomy_ids(self):
+        """Game list combines repeated facet IDs across taxonomy kinds."""
+        taxonomy_values = [
+            ("101", "First Game", 4, "Fighting", 10, "Fantasy"),
+            ("202", "Second Game", 5, "Adventure", 11, "Science fiction"),
+        ]
+        for media_id, title, genre_id, genre, theme_id, theme in taxonomy_values:
+            item = Item.objects.create(
+                media_id=media_id,
+                source=Sources.IGDB.value,
+                media_type=MediaTypes.GAME.value,
+                title=title,
+                image="http://example.com/image.jpg",
+            )
+            Game.objects.create(item=item, user=self.user, status=Status.COMPLETED)
+            store_igdb_game_taxonomies(
+                item,
+                {
+                    "genres": [{"id": genre_id, "name": genre}],
+                    "themes": [{"id": theme_id, "name": theme}],
+                    "keywords": [],
+                },
+            )
+
+        response = self.client.get(
+            reverse("medialist", args=[self.user.username, MediaTypes.GAME.value])
+            + "?genre=4&genre=5&theme=10",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "IGDB facets")
+        self.assertContains(response, 'role="tablist"')
+        self.assertContains(response, 'role="tab"')
+        self.assertContains(response, "Genre")
+        self.assertContains(response, "Theme")
+        self.assertContains(response, "Keyword")
+        self.assertContains(response, 'name="genre"')
+        self.assertContains(response, 'value="4"')
+        self.assertContains(response, "checked")
+        self.assertEqual(response.context["media_list"].paginator.count, 1)
+        self.assertEqual(response.context["media_list"][0].item.title, "First Game")
+        self.assertEqual(
+            response.context["current_taxonomy_filters"],
+            {"genre": [4, 5], "theme": [10], "keyword": []},
+        )
+        self.assertEqual(
+            [
+                option["name"]
+                for option in response.context["taxonomy_options"]["genre"]
+            ],
+            ["Adventure", "Fighting"],
+        )
 
     def test_media_list_htmx_request(self):
         """Test the media list view with HTMX request."""

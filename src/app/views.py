@@ -20,10 +20,12 @@ from app import config, helpers, history_processor
 from app import home as home_helpers
 from app import statistics as stats
 from app.forms import EpisodeForm, ManualItemForm, get_form_class
+from app.metadata import store_igdb_game_taxonomies
 from app.models import (
     TV,
     BasicMedia,
     Episode,
+    IGDBGameTaxonomy,
     Item,
     MediaTypes,
     Season,
@@ -43,6 +45,73 @@ from users.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _persist_igdb_taxonomies_for_item(item, metadata):
+    """Persist IGDB facets only when a successful response supplied them."""
+    if (
+        item.source == Sources.IGDB.value
+        and item.media_type == MediaTypes.GAME.value
+        and "igdb_taxonomies" in metadata
+    ):
+        store_igdb_game_taxonomies(
+            item,
+            metadata["igdb_taxonomies"],
+            provider_updated_at=metadata.get("igdb_updated_at"),
+        )
+
+
+IGDB_TAXONOMY_KIND_BY_PARAMETER = {
+    "genre": IGDBGameTaxonomy.Kind.GENRE,
+    "theme": IGDBGameTaxonomy.Kind.THEME,
+    "keyword": IGDBGameTaxonomy.Kind.KEYWORD,
+}
+
+
+def get_igdb_game_taxonomy_filters(query_params):
+    """Parse repeated IGDB taxonomy IDs and map active kinds for the queryset."""
+    current_filters = {}
+    for parameter in IGDB_TAXONOMY_KIND_BY_PARAMETER:
+        selected_ids = []
+        for value in query_params.getlist(parameter):
+            try:
+                provider_id = int(value)
+            except ValueError:
+                continue
+            if provider_id > 0 and provider_id not in selected_ids:
+                selected_ids.append(provider_id)
+        current_filters[parameter] = selected_ids
+
+    active_filters = {
+        IGDB_TAXONOMY_KIND_BY_PARAMETER[parameter]: provider_ids
+        for parameter, provider_ids in current_filters.items()
+        if provider_ids
+    }
+    return current_filters, active_filters
+
+
+def get_igdb_game_taxonomy_options(user, media_type, current_filters):
+    """Return facets available in one user's tracked IGDB game library."""
+    if media_type != MediaTypes.GAME.value:
+        return {}
+
+    return {
+        parameter: [
+            {
+                "provider_id": taxonomy.provider_id,
+                "name": taxonomy.name,
+                "selected": taxonomy.provider_id in current_filters[parameter],
+            }
+            for taxonomy in IGDBGameTaxonomy.objects.filter(
+                kind=kind,
+                game_assignments__metadata__item__source=Sources.IGDB.value,
+                game_assignments__metadata__item__game__user=user,
+            )
+            .distinct()
+            .order_by("name")
+        ]
+        for parameter, kind in IGDB_TAXONOMY_KIND_BY_PARAMETER.items()
+    }
 
 
 @require_GET
@@ -211,6 +280,9 @@ def media_list(request, username, media_type):
 
     search_query = request.GET.get("search", "")
     page = request.GET.get("page", 1)
+    current_taxonomy_filters, active_taxonomy_filters = (
+        get_igdb_game_taxonomy_filters(request.GET)
+    )
 
     # Prepare status filter for database query
     if not status_filter:
@@ -223,6 +295,13 @@ def media_list(request, username, media_type):
         status_filter=status_filter,
         sort_filter=sort_filter,
         search=search_query,
+        taxonomy_filters=active_taxonomy_filters or None,
+    )
+
+    taxonomy_options = get_igdb_game_taxonomy_options(
+        target_user,
+        media_type,
+        current_taxonomy_filters,
     )
 
     # Paginate results
@@ -246,6 +325,9 @@ def media_list(request, username, media_type):
         "sort_choices": MediaSortChoices.choices,
         "status_choices": MediaStatusChoices.choices,
         "target_user": target_user,
+        "taxonomy_options": taxonomy_options,
+        "has_taxonomy_options": any(taxonomy_options.values()),
+        "current_taxonomy_filters": current_taxonomy_filters,
     }
 
     # Handle HTMX requests for partial updates. Soft-navigation requests (e.g.
@@ -482,6 +564,7 @@ def sync_metadata(request, source, media_type, media_id, season_number=None):
                 "image": metadata["image"],
             },
         )
+        _persist_igdb_taxonomies_for_item(item, metadata)
         title = metadata["title"]
         if season_number:
             title += f" - Season {season_number}"
@@ -645,6 +728,7 @@ def media_save(request):
                 "image": metadata["image"],
             },
         )
+        _persist_igdb_taxonomies_for_item(item, metadata)
         model = apps.get_model(app_label="app", model_name=media_type)
         instance = model(item=item, user=request.user)
 
