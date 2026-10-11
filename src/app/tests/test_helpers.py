@@ -1,12 +1,14 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from app.helpers import (
+    annotate_season_seen_for_viewer,
     build_absolute_app_url,
     enrich_items_with_user_data,
     form_error_messages,
@@ -318,3 +320,37 @@ class EnrichItemsWithUserDataTest(TestCase):
             self.request, raw_items, "recommendations"
         )
         self.assertEqual(len(enriched_items), 2)
+
+
+class AnnotateSeasonSeenForViewerTests(SimpleTestCase):
+    """Test season progress annotation for cards rendered from another library."""
+
+    @patch("app.helpers._build_user_media_lookup")
+    def test_annotation_uses_viewer_tracking(self, mock_media_lookup):
+        """Use the logged-in viewer's season record, not the library owner's."""
+        viewer = MagicMock(is_authenticated=True)
+        season = SimpleNamespace(
+            item=SimpleNamespace(
+                media_id="tv-1",
+                source=Sources.TMDB.value,
+                season_number=1,
+            ),
+        )
+        mock_media_lookup.return_value = {
+            ("tv-1", Sources.TMDB.value, 1): SimpleNamespace(is_seen=True),
+        }
+
+        annotate_season_seen_for_viewer(viewer, [season])
+
+        mock_media_lookup.assert_called_once_with(
+            viewer,
+            [
+                {
+                    "media_id": "tv-1",
+                    "source": Sources.TMDB.value,
+                    "season_number": 1,
+                },
+            ],
+            MediaTypes.SEASON.value,
+        )
+        self.assertTrue(season.viewer_season_seen)

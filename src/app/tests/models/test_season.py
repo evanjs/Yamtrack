@@ -127,6 +127,42 @@ class SeasonModel(TestCase):
         )
         Episode.save_base(episode)
 
+    def test_is_seen_when_any_episode_has_watch_history(self):
+        """A watched child episode makes an in-progress season seen."""
+        self.assertTrue(self.season.is_seen)
+
+    def test_is_seen_when_episode_watch_has_no_date(self):
+        """Undated episode history still indicates that the season was watched."""
+        Episode.objects.filter(related_season=self.season).update(end_date=None)
+
+        self.assertTrue(self.season.is_seen)
+
+    def test_is_seen_when_season_is_in_progress_without_episode_history(self):
+        """In-progress season tracking reveals the season without episode logs."""
+        self.season.episodes.all().delete()
+        self.season.status = Status.IN_PROGRESS.value
+        Season.save_base(self.season)
+
+        self.assertTrue(self.season.is_seen)
+
+    def test_is_seen_for_terminal_statuses_without_episode_history(self):
+        """Paused, completed, and dropped seasons count as seen."""
+        self.season.episodes.all().delete()
+        for status in (Status.PAUSED, Status.COMPLETED, Status.DROPPED):
+            with self.subTest(status=status):
+                self.season.status = status.value
+                Season.save_base(self.season)
+
+                self.assertTrue(self.season.is_seen)
+
+    def test_is_not_seen_for_untracked_or_planning_season(self):
+        """A season with no watched episodes and planning status is unseen."""
+        self.season.episodes.all().delete()
+        self.season.status = Status.PLANNING.value
+        Season.save_base(self.season)
+
+        self.assertFalse(self.season.is_seen)
+
     def test_season_progress(self):
         """Test the progress property of the Season model."""
         self.assertEqual(self.season.progress, 2)
@@ -528,6 +564,72 @@ class SeasonStatusTests(TestCase):
 
         self.tv.refresh_from_db()
         self.assertEqual(self.tv.status, Status.IN_PROGRESS.value)
+
+    @patch("app.models.providers.services.get_media_metadata")
+    def test_completed_status_respects_disabled_auto_start(self, mock_get_metadata):
+        """A disabled preference leaves the next season unstarted."""
+        self.user.auto_start_next_season = False
+        self.user.save()
+        mock_get_metadata.side_effect = [
+            {
+                "episodes": [
+                    {
+                        "episode_number": 1,
+                        "image": "img1.jpg",
+                        "air_date": datetime(2020, 1, 1, tzinfo=UTC),
+                    },
+                ],
+                "image": "season_img.jpg",
+            },
+            {
+                "related": {
+                    "seasons": [
+                        {
+                            "season_number": 1,
+                            "image": "season_img.jpg",
+                            "first_air_date": datetime(2020, 1, 1, tzinfo=UTC),
+                        },
+                        {
+                            "season_number": 2,
+                            "image": "season_img2.jpg",
+                            "first_air_date": datetime(2020, 1, 1, tzinfo=UTC),
+                        },
+                    ],
+                },
+            },
+        ]
+
+        self.season.status = Status.COMPLETED.value
+        self.season.save()
+
+        self.assertFalse(
+            Season.objects.filter(user=self.user, item__season_number=2).exists()
+        )
+        self.tv.refresh_from_db()
+        self.assertEqual(self.tv.status, Status.IN_PROGRESS.value)
+
+    @patch("app.models.providers.services.get_media_metadata")
+    def test_starting_tv_does_not_start_season_when_disabled(self, mock_get_metadata):
+        """Disabling auto-start also leaves a planned season unchanged."""
+        self.user.auto_start_next_season = False
+        self.user.save()
+        mock_get_metadata.return_value = {
+            "related": {
+                "seasons": [
+                    {
+                        "season_number": 1,
+                        "image": "season_img.jpg",
+                        "first_air_date": datetime(2020, 1, 1, tzinfo=UTC),
+                    },
+                ],
+            },
+        }
+
+        self.tv.status = Status.IN_PROGRESS.value
+        self.tv.save()
+
+        self.season.refresh_from_db()
+        self.assertEqual(self.season.status, Status.PLANNING.value)
 
     @patch("app.models.providers.services.get_media_metadata")
     def test_completed_last_season_completes_tv_show(self, mock_get_metadata):

@@ -205,6 +205,8 @@ def enrich_items_with_user_data(request, items, section_name):
             key = (str(item["media_id"]), item["source"])
 
         media_item = media_lookup.get(key)
+        if media_type == MediaTypes.SEASON.value and media_item is not None:
+            media_item.viewer_season_seen = media_item.is_seen
         if _should_skip_completed_recommendation(
             request.user, section_name, media_item
         ):
@@ -222,6 +224,31 @@ def enrich_items_with_user_data(request, items, section_name):
         Item.objects.bulk_update(items_to_refresh, ["image"])
 
     return enriched_items
+
+
+def annotate_season_seen_for_viewer(user, seasons, media_type=MediaTypes.SEASON.value):
+    """Attach the logged-in viewer's season progress to another user's cards."""
+    if media_type != MediaTypes.SEASON.value or not seasons:
+        return
+
+    if not user.is_authenticated:
+        for season in seasons:
+            season.viewer_season_seen = False
+        return
+
+    season_items = [
+        {
+            "media_id": season.item.media_id,
+            "source": season.item.source,
+            "season_number": season.item.season_number,
+        }
+        for season in seasons
+    ]
+    media_lookup = _build_user_media_lookup(user, season_items, MediaTypes.SEASON.value)
+    for season in seasons:
+        key = (season.item.media_id, season.item.source, season.item.season_number)
+        viewer_media = media_lookup.get(key)
+        season.viewer_season_seen = bool(viewer_media and viewer_media.is_seen)
 
 
 def _build_user_media_lookup(user, items, media_type):

@@ -246,6 +246,17 @@ def preferences(request):
     # Process form submission
     request.user.clickable_media_cards = "clickable_media_cards" in request.POST
     request.user.obfuscate_unseen_episodes = "obfuscate_unseen_episodes" in request.POST
+    request.user.obfuscate_unseen_seasons = "obfuscate_unseen_seasons" in request.POST
+    request.user.obfuscate_unseen_season_titles = (
+        "obfuscate_unseen_season_titles" in request.POST
+    )
+    request.user.obfuscate_unseen_season_artwork = (
+        "obfuscate_unseen_season_artwork" in request.POST
+    )
+    request.user.obfuscate_unseen_season_episode_counts = (
+        "obfuscate_unseen_season_episode_counts" in request.POST
+    )
+    request.user.auto_start_next_season = "auto_start_next_season" in request.POST
     request.user.quick_watch_date = request.POST.get(
         "quick_watch_date",
         QuickWatchDateChoices.CURRENT_DATE,

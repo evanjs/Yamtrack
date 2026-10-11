@@ -1,14 +1,23 @@
 {% load app_tags %}
 
 <div class="{% if secondary_color %}bg-[#39404b]{% else %}bg-[#2a2f35]{% endif %} rounded-lg overflow-hidden shadow-lg relative {% if active %}ring-[1.5px] ring-slate-400{% endif %}"
-     x-data="{ trackOpen: false, listsOpen: false, historyOpen: false }">
+     x-data="{ trackOpen: false, listsOpen: false, historyOpen: false, seasonRevealed: false }">
   <div class="relative">
     <a href="{{ item|media_url }}">
-      <img alt="{{ title }}"
+      <img alt="{% if request.user.obfuscate_unseen_seasons and item.media_type == MediaTypes.SEASON.value and not media.viewer_season_seen %}{% if request.user.obfuscate_unseen_season_artwork or request.user.obfuscate_unseen_season_titles %}{{ item.title }} — Season {{ item.season_number }} artwork{% else %}{{ title }}{% endif %}{% else %}{{ title }}{% endif %}"
            class="lazyload w-full {% if from_grid %}aspect-2/3{% else %}h-48{% endif %} bg-[#3e454d] {% if item.image != IMG_NONE %}object-cover{% endif %}"
+           {% if request.user.obfuscate_unseen_seasons and item.media_type == MediaTypes.SEASON.value and request.user.obfuscate_unseen_season_artwork and not media.viewer_season_seen %}:class="{ 'blur': !seasonRevealed }" x-cloak{% endif %}
            data-src="{{ item.image }}"
            src="{{ IMG_NONE }}">
     </a>
+    {% if request.user.obfuscate_unseen_seasons and item.media_type == MediaTypes.SEASON.value and not media.viewer_season_seen and request.user.obfuscate_unseen_season_artwork or request.user.obfuscate_unseen_seasons and item.media_type == MediaTypes.SEASON.value and not media.viewer_season_seen and request.user.obfuscate_unseen_season_titles %}
+      <button type="button"
+              class="absolute bottom-2 right-2 z-10 rounded bg-gray-900/90 px-2 py-1 text-xs text-white hover:bg-gray-800"
+              aria-label="Reveal season details"
+              @click.stop.prevent="seasonRevealed = true"
+              x-show="!seasonRevealed"
+              x-cloak>Reveal</button>
+    {% endif %}
     {% with user=target_user|default:user %}
       {% if media.status %}
         <div class="absolute top-2 left-2 bg-gray-900/90 text-white text-xs px-2 py-1 rounded-md flex items-center shadow-md">
@@ -102,7 +111,14 @@
   <div class="p-3">
     <a href="{{ item|media_url }}"
        class="text-sm font-semibold text-white hover:text-indigo-400 transition duration-300 line-clamp-1"
-       title="{{ title }}">{{ title }}</a>
+       title="{% if request.user.obfuscate_unseen_seasons and item.media_type == MediaTypes.SEASON.value and request.user.obfuscate_unseen_season_titles and not media.viewer_season_seen %}{{ item.title }} — Season {{ item.season_number }}{% else %}{{ title }}{% endif %}">
+      {% if request.user.obfuscate_unseen_seasons and item.media_type == MediaTypes.SEASON.value and request.user.obfuscate_unseen_season_titles and not media.viewer_season_seen %}
+        <span x-show="!seasonRevealed">{{ item.title }} — Season {{ item.season_number }}</span>
+        <span x-show="seasonRevealed" x-cloak>{{ title }}</span>
+      {% else %}
+        {{ title }}
+      {% endif %}
+    </a>
   </div>
 
   {% if item.media_type == MediaTypes.EPISODE.value %}

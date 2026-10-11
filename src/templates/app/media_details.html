@@ -9,14 +9,22 @@
 {% endblock title %}
 
 {% block content %}
-  <div x-data="{ tab: 'overview' }">
+  <div x-data="{ tab: 'overview', seasonRevealed: false }">
     {# Top section #}
     <div class="flex flex-col md:flex-row gap-8 md:gap-10 mb-12 md:mb-8">
       {# Poster #}
       <div class="w-full md:w-1/4 max-w-62.5 mx-auto md:mx-0">
-        <img alt="{{ media.title }}"
+        <img alt="{% if media_type == MediaTypes.SEASON.value and request.user.obfuscate_unseen_seasons and not season_is_seen %}{% if request.user.obfuscate_unseen_season_artwork or request.user.obfuscate_unseen_season_titles %}Season {{ media.season_number }} artwork{% else %}{{ media.title }}{% endif %}{% else %}{{ media.title }}{% endif %}"
              class="w-full rounded-lg shadow-lg bg-[#2a2f35] object-cover"
+             {% if media_type == MediaTypes.SEASON.value and request.user.obfuscate_unseen_seasons and request.user.obfuscate_unseen_season_artwork and not season_is_seen %}:class="{ 'blur': !seasonRevealed }" x-cloak{% endif %}
              src="{{ media.image }}">
+
+        {% if media_type == MediaTypes.SEASON.value and request.user.obfuscate_unseen_seasons and not season_is_seen and request.user.obfuscate_unseen_season_artwork or media_type == MediaTypes.SEASON.value and request.user.obfuscate_unseen_seasons and not season_is_seen and request.user.obfuscate_unseen_season_titles %}
+          <button type="button"
+                  class="mt-2 rounded bg-gray-700 px-3 py-1 text-sm text-white hover:bg-gray-600"
+                  @click="seasonRevealed = true"
+                  x-show="!seasonRevealed">Reveal season details</button>
+        {% endif %}
 
         <div class="mt-4 relative flex items-stretch"
              x-data="{ trackOpen: false, createOpen: false, menuOpen: false }"
@@ -95,7 +103,14 @@
           </h2>
 
           <div class="flex flex-col md:flex-row gap-y-4 md:gap-y-0 items-center justify-between mb-6">
-            <h1 class="text-3xl font-bold">{{ media.season_title }}</h1>
+            <h1 class="text-3xl font-bold">
+              {% if request.user.obfuscate_unseen_seasons and request.user.obfuscate_unseen_season_titles and not season_is_seen %}
+                <span x-show="!seasonRevealed">Season {{ media.season_number }}</span>
+                <span x-show="seasonRevealed" x-cloak>{{ media.season_title }}</span>
+              {% else %}
+                {{ media.season_title }}
+              {% endif %}
+            </h1>
 
             {# Season dropdown #}
             <div class="relative"
@@ -104,7 +119,13 @@
                  @keydown.escape.window="open = false">
               <button @click="open = !open"
                       class="flex items-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-md transition-colors duration-200 cursor-pointer">
-                <span class="text-sm font-medium">{{ media.season_title }}</span>
+                <span class="text-sm font-medium">
+                  {% if request.user.obfuscate_unseen_seasons and request.user.obfuscate_unseen_season_titles and not season_is_seen %}
+                    Season {{ media.season_number }}
+                  {% else %}
+                    {{ media.season_title }}
+                  {% endif %}
+                </span>
                 <div class="w-4 h-4" :class="{ 'rotate-180': open }">{% include "app/icons/chevron-down.svg" %}</div>
               </button>
               <div x-show="open"
@@ -123,10 +144,18 @@
                         {{ tv_season.season_number }}
                       </div>
                       <div class="flex-1 text-left">
-                        <div class="text-sm font-medium">{{ tv_season.season_title }}</div>
+                        <div class="text-sm font-medium">
+                          {% if request.user.obfuscate_unseen_seasons and request.user.obfuscate_unseen_season_titles and not tv_season.is_seen %}
+                            Season {{ tv_season.season_number }}
+                          {% else %}
+                            {{ tv_season.season_title }}
+                          {% endif %}
+                        </div>
                         <div class="text-xs text-gray-400">
-                          {{ tv_season.max_progress }} Episode{{ tv_season.max_progress|pluralize }}
-                          {% if tv_season.first_air_date %}• {{ tv_season.first_air_date }}{% endif %}
+                          {% if not request.user.obfuscate_unseen_seasons or not request.user.obfuscate_unseen_season_episode_counts or tv_season.is_seen %}
+                            {{ tv_season.max_progress }} Episode{{ tv_season.max_progress|pluralize }}{% if tv_season.first_air_date %} • {% endif %}
+                          {% endif %}
+                          {% if tv_season.first_air_date %}{{ tv_season.first_air_date }}{% endif %}
                         </div>
                       </div>
                     </a>

@@ -1607,6 +1607,10 @@ class TV(Media):
             ):
                 continue
 
+            if not self.user.auto_start_next_season:
+                season_started = True
+                break
+
             if next_unwatched_season is None:
                 item, _ = Item.objects.get_or_create(
                     media_id=self.item.media_id,
@@ -1862,6 +1866,20 @@ class Season(Media):
             return Status.IN_PROGRESS.value
 
         return unreleased_only_status
+
+    @property
+    def is_seen(self):
+        """Return whether tracking data indicates this season was watched."""
+        return (
+            self.status
+            in {
+                Status.IN_PROGRESS.value,
+                Status.PAUSED.value,
+                Status.COMPLETED.value,
+                Status.DROPPED.value,
+            }
+            or self.episodes.exists()
+        )
 
     @property
     def progress(self):

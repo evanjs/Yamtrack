@@ -7,10 +7,12 @@ from app.metadata import (
     store_tmdb_movie_taxonomies,
 )
 from app.models import (
+    TV,
     Game,
     Item,
     MediaTypes,
     Movie,
+    Season,
     Sources,
     Status,
 )
@@ -298,3 +300,49 @@ class MediaListViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("media_list", response.context)
+
+
+class SeasonCardObfuscationTests(TestCase):
+    """Test season card obfuscation in the tracked-season list."""
+
+    def setUp(self):
+        """Create an unseen tracked season without provider calls."""
+        self.user = get_user_model().objects.create_user(
+            username="season-card-user",
+            obfuscate_unseen_seasons=True,
+        )
+        self.client.force_login(self.user)
+        tv_item = Item.objects.create(
+            media_id="tv-card",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.TV.value,
+            title="Test Show",
+            image="http://example.com/tv.jpg",
+        )
+        season_item = Item.objects.create(
+            media_id="tv-card",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.SEASON.value,
+            title="Test Show",
+            image="http://example.com/season.jpg",
+            season_number=1,
+        )
+        tv = TV(item=tv_item, user=self.user, status=Status.IN_PROGRESS.value)
+        TV.save_base(tv)
+        season = Season(
+            item=season_item,
+            user=self.user,
+            related_tv=tv,
+            status=Status.PLANNING.value,
+        )
+        Season.save_base(season)
+
+    def test_unseen_season_card_has_ordinal_and_reveal_control(self):
+        """Unseen card titles stay neutral and offer an explicit reveal action."""
+        response = self.client.get(
+            reverse("medialist", args=[self.user.username, MediaTypes.SEASON.value]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Test Show — Season 1")
+        self.assertContains(response, 'aria-label="Reveal season details"')

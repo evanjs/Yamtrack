@@ -122,6 +122,61 @@ class SidebarViewTests(TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("view-only for demo accounts", str(messages[0]))
 
+    def test_obfuscate_unseen_seasons_preferences_persist_and_clear(self):
+        """Season obfuscation and its detail choices save as independent checkboxes."""
+        self.assertFalse(self.user.obfuscate_unseen_seasons)
+        self.assertTrue(self.user.obfuscate_unseen_season_titles)
+        self.assertTrue(self.user.obfuscate_unseen_season_artwork)
+        self.assertTrue(self.user.obfuscate_unseen_season_episode_counts)
+
+        self.client.post(
+            reverse("preferences"),
+            {
+                "obfuscate_unseen_seasons": "on",
+                "obfuscate_unseen_season_titles": "on",
+                "obfuscate_unseen_season_artwork": "on",
+                "obfuscate_unseen_season_episode_counts": "on",
+                "media_types_checkboxes": [MediaTypes.TV.value],
+            },
+        )
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.obfuscate_unseen_seasons)
+
+        self.client.post(
+            reverse("preferences"),
+            {"media_types_checkboxes": [MediaTypes.TV.value]},
+        )
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.obfuscate_unseen_seasons)
+        self.assertFalse(self.user.obfuscate_unseen_season_titles)
+        self.assertFalse(self.user.obfuscate_unseen_season_artwork)
+        self.assertFalse(self.user.obfuscate_unseen_season_episode_counts)
+
+    def test_auto_start_next_season_preference_can_be_disabled(self):
+        """The automatic next-season preference defaults on and is persisted."""
+        self.assertTrue(self.user.auto_start_next_season)
+        self.assertContains(
+            self.client.get(reverse("preferences")),
+            "Automatically Start Next Season",
+        )
+
+        self.client.post(
+            reverse("preferences"),
+            {"media_types_checkboxes": [MediaTypes.TV.value]},
+        )
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.auto_start_next_season)
+
+        self.client.post(
+            reverse("preferences"),
+            {
+                "auto_start_next_season": "on",
+                "media_types_checkboxes": [MediaTypes.TV.value],
+            },
+        )
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.auto_start_next_season)
+
     def test_obfuscate_unseen_episodes_post_enable(self):
         """Test enabling obfuscate_unseen_episodes via preferences."""
         self.user.obfuscate_unseen_episodes = False

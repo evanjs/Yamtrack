@@ -61,6 +61,65 @@
         </div>
       </div>
 
+      {# Obfuscate Unseen Seasons #}
+      <div class="mb-5">
+        <div class="p-3 bg-[#39404b] rounded-md">
+          <div class="flex items-center justify-between">
+            <div class="flex-1">
+              <div class="flex items-center text-gray-200 mb-1">
+                {% include "app/icons/eye.svg" with classes="w-5 h-5 mr-2" %}
+                <span class="text-sm font-medium">Obfuscate Unseen Seasons</span>
+              </div>
+              <p class="text-xs text-gray-400 ml-7">Hide selected season details unless your tracking shows you have seen the season.</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer ml-4">
+              <input class="sr-only peer"
+                     type="checkbox"
+                     name="obfuscate_unseen_seasons"
+                     {% if user.obfuscate_unseen_seasons %}checked{% endif %}>
+              <div class="w-9 h-5 bg-gray-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-px after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:bg-indigo-600">
+              </div>
+            </label>
+          </div>
+          <fieldset class="ml-7 mt-3 space-y-2">
+            <legend class="text-xs text-gray-400 mb-2">Hide these details</legend>
+            <label class="flex items-center gap-2 text-sm text-gray-300">
+              <input type="checkbox" name="obfuscate_unseen_season_titles" {% if user.obfuscate_unseen_season_titles %}checked{% endif %}>
+              Season titles
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-300">
+              <input type="checkbox" name="obfuscate_unseen_season_artwork" {% if user.obfuscate_unseen_season_artwork %}checked{% endif %}>
+              Season artwork
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-300">
+              <input type="checkbox" name="obfuscate_unseen_season_episode_counts" {% if user.obfuscate_unseen_season_episode_counts %}checked{% endif %}>
+              Episode counts
+            </label>
+          </fieldset>
+        </div>
+      </div>
+
+      {# Automatically Start Next Season #}
+      <div class="mb-5">
+        <div class="flex items-center justify-between p-3 bg-[#39404b] rounded-md">
+          <div class="flex-1">
+            <div class="flex items-center text-gray-200 mb-1">
+              {% include "app/icons/right-arrow.svg" with classes="w-5 h-5 mr-2" %}
+              <span class="text-sm font-medium">Automatically Start Next Season</span>
+            </div>
+            <p class="text-xs text-gray-400 ml-7">When enabled, Yamtrack marks the next available season In Progress when a show is started or a season is completed.</p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer ml-4">
+            <input class="sr-only peer"
+                   type="checkbox"
+                   name="auto_start_next_season"
+                   {% if user.auto_start_next_season %}checked{% endif %}>
+            <div class="w-9 h-5 bg-gray-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-px after:left-0.5 after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:bg-indigo-600">
+            </div>
+          </label>
+        </div>
+      </div>
+
       {# Quick Watch Date #}
       <div class="mb-5">
         <div class="flex items-center justify-between p-3 bg-[#39404b] rounded-md">

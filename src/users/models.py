@@ -321,8 +321,19 @@ class User(AbstractUser):
         default=False,
         help_text="Blur unseen episode images and descriptions",
     )
+    obfuscate_unseen_seasons = models.BooleanField(
+        default=False,
+        help_text="Obfuscate details for unseen TV seasons",
+    )
+    obfuscate_unseen_season_titles = models.BooleanField(default=True)
+    obfuscate_unseen_season_artwork = models.BooleanField(default=True)
+    obfuscate_unseen_season_episode_counts = models.BooleanField(default=True)
 
     # Tracking settings
+    auto_start_next_season = models.BooleanField(
+        default=True,
+        help_text="Automatically start the next TV season when appropriate",
+    )
     quick_watch_date = models.CharField(
         max_length=20,
         default=QuickWatchDateChoices.CURRENT_DATE,

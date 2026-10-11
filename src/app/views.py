@@ -642,6 +642,12 @@ def media_list(request, username, media_type):
     paginator = Paginator(media_queryset, items_per_page)
     media_page = paginator.get_page(page)
 
+    helpers.annotate_season_seen_for_viewer(
+        request.user,
+        media_page.object_list,
+        media_type=media_type,
+    )
+
     BasicMedia.objects.annotate_max_progress(
         media_page.object_list,
         media_type,
@@ -790,6 +796,25 @@ def season_details(request, source, media_id, title, season_number):  # noqa: AR
         source,
         [season_number],
     )
+    related_seasons = (tv_with_seasons_metadata.get("related") or {}).get(
+        "seasons",
+        [],
+    )
+    if related_seasons:
+        enriched_seasons = helpers.enrich_items_with_user_data(
+            request,
+            related_seasons,
+            "season_selector",
+        )
+        tv_with_seasons_metadata["related"]["seasons"] = [
+            {
+                **season_result["item"],
+                "is_seen": bool(
+                    season_result["media"] and season_result["media"].is_seen
+                ),
+            }
+            for season_result in enriched_seasons
+        ]
     season_metadata = tv_with_seasons_metadata[f"season/{season_number}"]
 
     user_medias = BasicMedia.objects.filter_media_prefetch(
@@ -837,6 +862,7 @@ def season_details(request, source, media_id, title, season_number):  # noqa: AR
         "media_type": MediaTypes.SEASON.value,
         "user_medias": user_medias,
         "current_instance": current_instance,
+        "season_is_seen": bool(current_instance and current_instance.is_seen),
         "watch_providers": tmdb.filter_providers(
             season_metadata.get("providers"), request.user.watch_provider_region
         ),
@@ -1397,6 +1423,14 @@ def statistics(request):
         media_count,
     )
     score_distribution, top_rated = stats.get_score_distribution(user_media)
+    helpers.annotate_season_seen_for_viewer(
+        request.user,
+        [
+            media
+            for media in top_rated
+            if media.item.media_type == MediaTypes.SEASON.value
+        ],
+    )
     status_distribution = stats.get_status_distribution(user_media)
     status_pie_chart_data = stats.get_status_pie_chart_data(
         status_distribution,

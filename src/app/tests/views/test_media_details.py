@@ -72,7 +72,10 @@ class MediaDetailsViewTests(TestCase):
     def test_season_details_view(self, mock_process_episodes, mock_get_metadata):
         """Test the season details view."""
         self.user.obfuscate_unseen_episodes = True
-        self.user.save(update_fields=["obfuscate_unseen_episodes"])
+        self.user.obfuscate_unseen_seasons = True
+        self.user.save(
+            update_fields=["obfuscate_unseen_episodes", "obfuscate_unseen_seasons"]
+        )
 
         mock_get_metadata.return_value = {
             "title": "Test TV Show",
@@ -80,12 +83,42 @@ class MediaDetailsViewTests(TestCase):
             "source": Sources.TMDB.value,
             "media_type": MediaTypes.TV.value,
             "image": "http://example.com/image.jpg",
+            "related": {
+                "seasons": [
+                    {
+                        "source": Sources.TMDB.value,
+                        "media_type": MediaTypes.SEASON.value,
+                        "media_id": "1668",
+                        "title": "Test TV Show",
+                        "season_title": "Coven",
+                        "season_number": 1,
+                        "image": "http://example.com/season.jpg",
+                        "max_progress": 10,
+                    },
+                ],
+            },
             "season/1": {
                 "title": "Season 1",
+                "season_title": "Coven",
                 "media_id": "1668",
                 "media_type": MediaTypes.SEASON.value,
                 "source": Sources.TMDB.value,
+                "season_number": 1,
                 "image": "http://example.com/season.jpg",
+                "related": {
+                    "seasons": [
+                        {
+                            "source": Sources.TMDB.value,
+                            "media_type": MediaTypes.SEASON.value,
+                            "media_id": "1668",
+                            "title": "Test TV Show",
+                            "season_title": "Coven",
+                            "season_number": 1,
+                            "image": "http://example.com/season.jpg",
+                            "max_progress": 10,
+                        },
+                    ],
+                },
                 "episodes": [],
             },
         }
@@ -123,6 +156,10 @@ class MediaDetailsViewTests(TestCase):
         self.assertEqual(response.context["media"]["title"], "Season 1")
         self.assertEqual(len(response.context["media"]["episodes"]), 1)
         self.assertContains(response, "line-clamp-1 blur cursor-pointer")
+        self.assertContains(response, "Season 1")
+        self.assertContains(response, 'x-show="seasonRevealed" x-cloak>Coven</span>')
+        self.assertContains(response, 'aria-label="Reveal season details"')
+        self.assertNotContains(response, "10 Episodes")
 
         mock_get_metadata.assert_called_once_with(
             "tv_with_seasons",
