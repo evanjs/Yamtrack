@@ -151,6 +151,191 @@ def find(external_id, external_source):
     return data
 
 
+PERSON_SEARCH_LIMIT = 12
+PERSON_CREDIT_ROLES = {"all", "cast", "crew", "director", "writer", "producer"}
+PERSON_CREDIT_SORTS = {
+    "release_desc",
+    "release_asc",
+    "title_asc",
+    "title_desc",
+}
+
+
+def search_people(query):
+    """Search TMDB people and return normalized person choices."""
+    query = query.strip()
+    cache_key = f"search_{Sources.TMDB.value}_person_{query}"
+    data = cache.get(cache_key)
+    if data is None:
+        try:
+            response = services.api_request(
+                Sources.TMDB.value,
+                "GET",
+                f"{base_url}/search/person",
+                params={**base_params, "query": query, "page": 1},
+            )
+        except requests.exceptions.HTTPError as error:
+            handle_error(error)
+        data = [
+            {
+                "person_id": person["id"],
+                "name": person["name"],
+                "known_for": person.get("known_for_department", ""),
+                "image": get_image_url(person.get("profile_path")),
+            }
+            for person in response.get("results", [])[:PERSON_SEARCH_LIMIT]
+            if person.get("id") and person.get("name")
+        ]
+        cache.set(cache_key, data)
+    return data
+
+
+def person_birthday(person_id):
+    """Return a person's TMDB birthday, cached independently from credits."""
+    person_id = str(person_id)
+    if not person_id.isdecimal() or int(person_id) <= 0:
+        msg = f"Invalid TMDB person ID: {person_id!r}"
+        raise ValueError(msg)
+
+    cache_key = f"{Sources.TMDB.value}_person_birthday_{person_id}"
+    birthday = cache.get(cache_key)
+    if birthday is None:
+        try:
+            response = services.api_request(
+                Sources.TMDB.value,
+                "GET",
+                f"{base_url}/person/{person_id}",
+                params=base_params,
+            )
+        except requests.exceptions.HTTPError as error:
+            try:
+                handle_error(error)
+            except services.ProviderAPIError as provider_error:
+                logger.warning("Could not fetch TMDB birthday: %s", provider_error)
+                return None
+        except requests.exceptions.RequestException as error:
+            logger.warning("Could not fetch TMDB birthday: %s", error)
+            return None
+        birthday = response.get("birthday") or ""
+        cache.set(cache_key, birthday)
+    return birthday or None
+
+
+def person_movie_credits(person_id, role="all", sort="release_desc"):
+    """Return one person's movie credits, optionally narrowed to a role."""
+    person_id = str(person_id)
+    if not person_id.isdecimal() or int(person_id) <= 0:
+        msg = f"Invalid TMDB person ID: {person_id!r}"
+        raise ValueError(msg)
+
+    role = role.strip().casefold()
+    if role not in PERSON_CREDIT_ROLES:
+        role = "all"
+    sort = sort.strip().casefold()
+    if sort not in PERSON_CREDIT_SORTS:
+        sort = "release_desc"
+
+    cache_key = f"{Sources.TMDB.value}_person_movie_credits_{person_id}"
+    movie_credits = cache.get(cache_key)
+    if movie_credits is None:
+        try:
+            response = services.api_request(
+                Sources.TMDB.value,
+                "GET",
+                f"{base_url}/person/{person_id}/movie_credits",
+                params=base_params,
+            )
+        except requests.exceptions.HTTPError as error:
+            handle_error(error)
+        movie_credits = _normalize_person_movie_credits(response)
+        cache.set(cache_key, movie_credits)
+
+    filtered_credits = _filter_person_movie_credits(movie_credits, role)
+    return _sort_person_movie_credits(filtered_credits, sort)
+
+
+def _normalize_person_movie_credits(response):
+    """Group a person's cast and crew API credits by movie ID."""
+    grouped = {}
+    for credit_type, source_key in (("cast", "cast"), ("crew", "crew")):
+        for entry in response.get(source_key, []):
+            media_id = entry.get("id")
+            title = entry.get("title")
+            if not media_id or not title:
+                continue
+            credit = grouped.setdefault(
+                str(media_id),
+                {
+                    "media_id": str(media_id),
+                    "title": title,
+                    "release_date": entry.get("release_date") or "",
+                    "image": get_image_url(entry.get("poster_path")),
+                    "cast_roles": [],
+                    "crew_roles": [],
+                },
+            )
+            credit_roles = credit[f"{credit_type}_roles"]
+            if credit_type == "cast":
+                label = entry.get("character") or "Cast"
+            else:
+                label = entry.get("job") or "Crew"
+            if label not in credit_roles:
+                credit_roles.append(label)
+    movie_credits = list(grouped.values())
+    movie_credits.sort(key=lambda credit: credit["release_date"], reverse=True)
+    return movie_credits
+
+
+def _filter_person_movie_credits(movie_credits, role):
+    """Filter grouped credits and format role labels for display."""
+    filtered = []
+    for credit in movie_credits:
+        cast_roles = credit["cast_roles"]
+        crew_roles = credit["crew_roles"]
+        if role == "cast":
+            matching_roles = cast_roles
+        elif role == "crew":
+            matching_roles = crew_roles
+        elif role == "all":
+            matching_roles = cast_roles + crew_roles
+        else:
+            matching_roles = [
+                job for job in crew_roles if job.casefold() == role
+            ]
+        if not matching_roles:
+            continue
+        filtered.append(
+            {
+                "media_id": credit["media_id"],
+                "title": credit["title"],
+                "release_date": credit["release_date"],
+                "image": credit["image"],
+                "role": " · ".join(matching_roles),
+            },
+        )
+    return filtered
+
+
+def _sort_person_movie_credits(movie_credits, sort):
+    """Sort movie credits while keeping missing release dates last."""
+    if sort == "title_asc":
+        return sorted(movie_credits, key=lambda credit: credit["title"].casefold())
+    if sort == "title_desc":
+        return sorted(
+            movie_credits,
+            key=lambda credit: credit["title"].casefold(),
+            reverse=True,
+        )
+
+    dated = [credit for credit in movie_credits if credit["release_date"]]
+    undated = [credit for credit in movie_credits if not credit["release_date"]]
+    dated.sort(
+        key=lambda credit: credit["release_date"],
+        reverse=sort == "release_desc",
+    )
+    return dated + undated
+
+
 def movie(media_id):
     """Return the metadata for the selected movie from The Movie Database."""
     cache_key = f"{Sources.TMDB.value}_{MediaTypes.MOVIE.value}_{media_id}"

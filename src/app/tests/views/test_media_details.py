@@ -132,6 +132,57 @@ class MediaDetailsViewTests(TestCase):
         )
 
     @patch("app.providers.services.get_media_metadata")
+    def test_cast_card_keeps_tmdb_link_and_adds_yamtrack_search(
+        self,
+        mock_get_metadata,
+    ):
+        """Keep the main person link and offer a separate Yamtrack search."""
+        mock_get_metadata.return_value = {
+            "media_id": "238",
+            "title": "Test Movie",
+            "media_type": MediaTypes.MOVIE.value,
+            "source": Sources.TMDB.value,
+            "image": "http://example.com/image.jpg",
+            "max_progress": 1,
+            "details": {"release_date": "1985-04-25"},
+            "cast": [
+                {
+                    "id": 678,
+                    "name": "Linnea Quigley",
+                    "character": "Trash",
+                    "image": "http://example.com/person.jpg",
+                },
+            ],
+            "total_cast_count": 1,
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.TMDB.value,
+                    "media_type": MediaTypes.MOVIE.value,
+                    "media_id": "238",
+                    "title": "test-movie",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="https://www.themoviedb.org/person/678"')
+        self.assertContains(response, 'target="_blank"')
+        self.assertContains(response, "Search Yamtrack")
+        self.assertContains(response, 'hx-trigger="intersect once"')
+        self.assertContains(
+            response,
+            'hx-get="/discover/person-age/678?release_date=1985-04-25"',
+        )
+        self.assertContains(
+            response,
+            'href="/discover/person?person_id=678&amp;person_name=Linnea%20Quigley&amp;role=cast"',
+        )
+
+    @patch("app.providers.services.get_media_metadata")
     def test_media_details_refreshes_missing_item_image(self, mock_get_metadata):
         """Item.image is updated when missing and live metadata has one."""
         live_image = "http://example.com/fresh.jpg"

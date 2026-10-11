@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -229,6 +230,103 @@ def tmdb_movie_credit_search(request, username):
         },
     )
 
+
+def calculate_age_on_date(birthday, on_date):
+    """Return a person's age on a full ISO date, or None if unavailable."""
+    if not birthday or not on_date:
+        return None
+    try:
+        birth_date = date.fromisoformat(birthday)
+        reference_date = date.fromisoformat(on_date)
+    except (TypeError, ValueError):
+        return None
+
+    age = reference_date.year - birth_date.year
+    if (reference_date.month, reference_date.day) < (
+        birth_date.month,
+        birth_date.day,
+    ):
+        age -= 1
+    return age if age >= 0 else None
+
+
+PERSON_DISCOVERY_ROLES = (
+    ("all", "Any role"),
+    ("cast", "Cast"),
+    ("crew", "Crew"),
+    ("director", "Director"),
+    ("writer", "Writer"),
+    ("producer", "Producer"),
+)
+PERSON_DISCOVERY_SORTS = (
+    ("release_desc", "Release date — newest first"),
+    ("release_asc", "Release date — oldest first"),
+    ("title_asc", "Title (A-Z)"),
+    ("title_desc", "Title (Z-A)"),
+)
+
+
+@require_GET
+def discover_by_person(request):
+    """Search TMDB people or browse one person's movie credits."""
+    query = request.GET.get("q", "").strip()
+    person_id = request.GET.get("person_id", "").strip()
+    person_name = request.GET.get("person_name", "").strip()[:200]
+    role = request.GET.get("role", "all").strip().casefold()
+    valid_roles = {value for value, _label in PERSON_DISCOVERY_ROLES}
+    if role not in valid_roles:
+        role = "all"
+    sort = request.GET.get("sort", "release_desc").strip().casefold()
+    valid_sorts = {value for value, _label in PERSON_DISCOVERY_SORTS}
+    if sort not in valid_sorts:
+        sort = "release_desc"
+
+    people = []
+    movie_results = []
+    if person_id.isdecimal() and int(person_id) > 0:
+        movie_results = tmdb.person_movie_credits(person_id, role, sort)
+        birthday = tmdb.person_birthday(person_id)
+        for credit in movie_results:
+            age = calculate_age_on_date(birthday, credit.get("release_date"))
+            credit["age_at_release"] = f"{age} yo" if age is not None else ""
+    else:
+        person_id = ""
+        person_name = ""
+        if len(query) >= TMDB_CREDIT_SEARCH_MIN_LENGTH:
+            people = tmdb.search_people(query)
+
+    return render(
+        request,
+        "app/discover_by_person.html",
+        {
+            "query": query,
+            "people": people,
+            "credits": movie_results,
+            "person_id": person_id,
+            "person_name": person_name,
+            "role": role,
+            "role_options": PERSON_DISCOVERY_ROLES,
+            "sort": sort,
+            "sort_options": PERSON_DISCOVERY_SORTS,
+        },
+    )
+
+
+@require_GET
+def tmdb_person_age(request, person_id):
+    """Return a lazy-loaded age annotation for a cast card."""
+    if not person_id.isdecimal() or int(person_id) <= 0:
+        return HttpResponse(status=204)
+
+    release_date = request.GET.get("release_date", "")
+    try:
+        date.fromisoformat(release_date)
+    except (TypeError, ValueError):
+        return render(request, "app/components/person_age.html", {"age": None})
+
+    birthday = tmdb.person_birthday(person_id)
+    age = calculate_age_on_date(birthday, release_date)
+    return render(request, "app/components/person_age.html", {"age": age})
 
 def get_provider_taxonomy_filters(query_params, kind_by_parameter):
     """Parse repeated included/excluded taxonomy IDs for one provider."""

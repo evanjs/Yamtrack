@@ -13,8 +13,14 @@ urlpatterns = [
         views.tmdb_movie_credit_search,
         name="tmdb_movie_credit_search",
     ),
-    path("<str:username>/<media_type:media_type>", views.media_list, name="medialist"),
+    path("discover/person", views.discover_by_person, name="discover_by_person"),
+    path(
+        "discover/person-age/<str:person_id>",
+        views.tmdb_person_age,
+        name="tmdb_person_age",
+    ),
     path("search", views.media_search, name="search"),
+    path("<str:username>/<media_type:media_type>", views.media_list, name="medialist"),
     path(
         "details/<source:source>/<media_type:media_type>/<str:media_id>/<str:title>",
         views.media_details,

@@ -455,7 +455,7 @@
             <h2 class="text-xl font-bold mb-4">Cast</h2>
             <div class="flex overflow-x-auto gap-x-4 pb-5">
               {% for cast in media.cast %}
-                {% include "app/components/cast_card.html" with cast=cast %}
+                {% include "app/components/cast_card.html" with cast=cast release_date=media.details.release_date %}
               {% endfor %}
               {% if media.total_cast_count > 30 %}
                 <a href="{{ media.source_url }}/cast"

@@ -21,5 +21,24 @@
          title="{{ cast.name }}">{{ cast.name }}</div>
     <div class="text-xs text-gray-400 line-clamp-1 mt-0.5"
          title="{{ cast.character }}">{{ cast.character }}</div>
+    {% if cast.id and release_date %}
+      <span hx-get="{% url 'tmdb_person_age' person_id=cast.id %}?release_date={{ release_date|urlencode }}"
+            hx-trigger="intersect once"
+            hx-swap="outerHTML"
+            aria-live="polite"
+            class="text-xs text-gray-500"
+            style="display: inline-block;
+                   min-width: 1.5rem;
+                   min-height: 1rem">Age…</span>
+    {% endif %}
+    {% if cast.id %}
+      <a href="{% url 'discover_by_person' %}?person_id={{ cast.id }}&amp;person_name={{ cast.name|urlencode }}&amp;role=cast"
+         aria-label="Search movies with {{ cast.name }} in Yamtrack"
+         title="Search movies with {{ cast.name }} in Yamtrack"
+         class="inline-flex items-center gap-1 mt-1 text-xs text-indigo-300 hover:text-indigo-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400">
+        {% include "app/icons/magnifying-glass.svg" with classes="w-3 h-3" %}
+        <span>Search Yamtrack</span>
+      </a>
+    {% endif %}
   </div>
 </div>
