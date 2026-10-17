@@ -337,6 +337,119 @@ def _sort_person_movie_credits(movie_credits, sort):
     return dated + undated
 
 
+def person_tv_credits(person_id, role="all", sort="release_desc"):
+    """Return one person's TV credits, optionally narrowed to a role."""
+    person_id = str(person_id)
+    if not person_id.isdecimal() or int(person_id) <= 0:
+        msg = f"Invalid TMDB person ID: {person_id!r}"
+        raise ValueError(msg)
+
+    role = role.strip().casefold()
+    if role not in PERSON_CREDIT_ROLES:
+        role = "all"
+    sort = sort.strip().casefold()
+    if sort not in PERSON_CREDIT_SORTS:
+        sort = "release_desc"
+
+    cache_key = f"{Sources.TMDB.value}_person_tv_credits_{person_id}"
+    tv_credits = cache.get(cache_key)
+    if tv_credits is None:
+        try:
+            response = services.api_request(
+                Sources.TMDB.value,
+                "GET",
+                f"{base_url}/person/{person_id}/tv_credits",
+                params=base_params,
+            )
+        except requests.exceptions.HTTPError as error:
+            handle_error(error)
+        tv_credits = _normalize_person_tv_credits(response)
+        cache.set(cache_key, tv_credits)
+
+    filtered_credits = _filter_person_tv_credits(tv_credits, role)
+    return _sort_person_tv_credits(filtered_credits, sort)
+
+
+def _normalize_person_tv_credits(response):
+    """Group a person's cast and crew API credits by TV series ID."""
+    grouped = {}
+    for credit_type in ("cast", "crew"):
+        for entry in response.get(credit_type, []):
+            media_id = entry.get("id")
+            title = entry.get("name")
+            if not media_id or not title:
+                continue
+            credit = grouped.setdefault(
+                str(media_id),
+                {
+                    "media_id": str(media_id),
+                    "title": title,
+                    "first_air_date": entry.get("first_air_date") or "",
+                    "image": get_image_url(entry.get("poster_path")),
+                    "cast_roles": [],
+                    "crew_roles": [],
+                },
+            )
+            label = (
+                entry.get("character") or "Cast"
+                if credit_type == "cast"
+                else entry.get("job") or "Crew"
+            )
+            credit_roles = credit[f"{credit_type}_roles"]
+            if label not in credit_roles:
+                credit_roles.append(label)
+    credits = list(grouped.values())
+    credits.sort(key=lambda credit: credit["first_air_date"], reverse=True)
+    return credits
+
+
+def _filter_person_tv_credits(tv_credits, role):
+    """Filter grouped TV credits and format role labels for display."""
+    filtered = []
+    for credit in tv_credits:
+        cast_roles = credit["cast_roles"]
+        crew_roles = credit["crew_roles"]
+        if role == "cast":
+            matching_roles = cast_roles
+        elif role == "crew":
+            matching_roles = crew_roles
+        elif role == "all":
+            matching_roles = cast_roles + crew_roles
+        else:
+            matching_roles = [job for job in crew_roles if job.casefold() == role]
+        if matching_roles:
+            filtered.append(
+                {
+                    "media_id": credit["media_id"],
+                    "title": credit["title"],
+                    "first_air_date": credit["first_air_date"],
+                    "image": credit["image"],
+                    "role": " · ".join(matching_roles),
+                },
+            )
+    return filtered
+
+
+def _sort_person_tv_credits(tv_credits, sort):
+    """Sort TV credits by title or first-air date, keeping missing dates last."""
+    if sort == "title_asc":
+        return sorted(tv_credits, key=lambda credit: credit["title"].casefold())
+    if sort == "title_desc":
+        return sorted(
+            tv_credits,
+            key=lambda credit: credit["title"].casefold(),
+            reverse=True,
+        )
+
+    dated = [credit for credit in tv_credits if credit["first_air_date"]]
+    undated = [credit for credit in tv_credits if not credit["first_air_date"]]
+    dated.sort(
+        key=lambda credit: credit["first_air_date"],
+        reverse=sort == "release_desc",
+    )
+    return dated + undated
+
+
 def movie(media_id):
     """Return the metadata for the selected movie from The Movie Database."""
     cache_key = f"{Sources.TMDB.value}_{MediaTypes.MOVIE.value}_{media_id}"

@@ -75,6 +75,31 @@ class PersonDiscoveryViewTests(TestCase):
         mock_credits.assert_called_once_with("123", "director", "title_asc")
         mock_birthday.assert_called_once_with("123")
 
+    @patch("app.providers.tmdb.person_tv_credits")
+    def test_tv_discovery_renders_selected_person_credits(self, mock_credits):
+        """Render all-TMDB TV credits with TV-specific date and detail links."""
+        mock_credits.return_value = [
+            {
+                "media_id": "1668",
+                "title": "Friends",
+                "first_air_date": "1994-09-22",
+                "image": "https://image.tmdb.org/t/p/w500/friends.jpg",
+                "role": "Chandler Bing",
+            },
+        ]
+
+        response = self.client.get(
+            reverse("discover_tv_by_person"),
+            {"person_id": "123", "person_name": "Matthew Perry", "role": "all"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Discover TV by person")
+        self.assertContains(response, "Friends")
+        self.assertContains(response, "1994")
+        self.assertContains(response, "/details/tmdb/tv/1668/friends")
+        mock_credits.assert_called_once_with("123", "all", "release_desc")
+
 
 class CalculateAgeOnDateTests(TestCase):
     """Test release-date age calculations."""

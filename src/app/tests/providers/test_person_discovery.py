@@ -129,3 +129,39 @@ class TMDBPersonDiscoveryTests(TestCase):
         """Reject invalid person IDs before making an upstream request."""
         with self.assertRaises(ValueError):
             tmdb.person_movie_credits("not-an-id")
+
+    @patch("app.providers.services.api_request")
+    def test_person_tv_credits_groups_and_filters_cast_and_crew(self, mock_api_request):
+        """Normalize TMDB TV credits and filter by their cast/crew roles."""
+        mock_api_request.return_value = {
+            "cast": [
+                {
+                    "id": 1668,
+                    "name": "Friends",
+                    "first_air_date": "1994-09-22",
+                    "poster_path": "/friends.jpg",
+                    "character": "Chandler Bing",
+                },
+            ],
+            "crew": [
+                {
+                    "id": 1668,
+                    "name": "Friends",
+                    "first_air_date": "1994-09-22",
+                    "poster_path": "/friends.jpg",
+                    "job": "Executive Producer",
+                },
+            ],
+        }
+
+        results = tmdb.person_tv_credits("123", "all")
+        crew_results = tmdb.person_tv_credits("123", "crew")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["title"], "Friends")
+        self.assertEqual(results[0]["role"], "Chandler Bing · Executive Producer")
+        self.assertEqual(crew_results[0]["role"], "Executive Producer")
+        self.assertEqual(mock_api_request.call_count, 1)
+        self.assertTrue(
+            mock_api_request.call_args.args[2].endswith("/person/123/tv_credits"),
+        )

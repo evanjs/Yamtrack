@@ -15,6 +15,11 @@ urlpatterns = [
     ),
     path("discover/person", views.discover_by_person, name="discover_by_person"),
     path(
+        "discover/tv/person",
+        views.discover_tv_by_person,
+        name="discover_tv_by_person",
+    ),
+    path(
         "discover/person-age/<str:person_id>",
         views.tmdb_person_age,
         name="tmdb_person_age",

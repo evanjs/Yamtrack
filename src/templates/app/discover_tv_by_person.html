@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}
+  Discover TV by person - Yamtrack
+{% endblock title %}
+
+{% block content %}
+  <style>
+    .person-tv-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+
+    @media (min-width: 640px) {
+      .person-tv-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 1rem;
+      }
+    }
+
+    .person-tv-card {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid #39404b;
+      border-radius: 0.5rem;
+      background: #20252a;
+    }
+
+    .person-tv-poster {
+      display: block;
+      width: 100%;
+      aspect-ratio: 2 / 3;
+      object-fit: cover;
+      background: #20252a;
+    }
+
+    .person-tv-copy {
+      padding: 0.65rem;
+    }
+
+    .person-tv-title {
+      display: -webkit-box;
+      overflow: hidden;
+      font-weight: 600;
+      line-height: 1.3;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .person-tv-meta,
+    .person-tv-role {
+      margin-top: 0.35rem;
+      font-size: 0.8rem;
+    }
+
+    .person-tv-meta {
+      color: #a8b0ba;
+    }
+
+    .person-tv-role {
+      color: #63d6a3;
+      overflow-wrap: anywhere;
+    }
+
+    .person-tv-controls {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0.75rem;
+    }
+
+    @media (min-width: 900px) {
+      .person-tv-controls {
+        grid-template-columns: minmax(0, 1fr) 11rem 13rem auto;
+        align-items: end;
+      }
+    }
+  </style>
+  <div class="max-w-5xl mx-auto">
+    <h2 class="text-2xl font-bold mb-2">Discover TV by person</h2>
+    <p class="text-gray-400 mb-6">Find TV shows from someone's TMDB cast and crew credits, whether or not they're in your library.</p>
+
+    {% if person_id %}
+      <form method="get"
+            action="{% url 'discover_tv_by_person' %}"
+            class="bg-[#2a2f35] rounded-lg p-5 mb-6">
+        <input type="hidden" name="person_id" value="{{ person_id }}">
+        <input type="hidden" name="person_name" value="{{ person_name }}">
+        <div class="person-tv-controls">
+          <div>
+            <label class="block text-sm text-gray-300 mb-2" for="person-name">Person</label>
+            <div id="person-name"
+                 class="px-3 py-2.5 rounded-md bg-[#20252a] border border-gray-700">{{ person_name|default:"Selected person" }}</div>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-300 mb-2" for="role">Credit role</label>
+            <select id="role"
+                    name="role"
+                    class="w-full px-3 py-2.5 rounded-md bg-[#20252a] border border-gray-700 text-gray-100">
+              {% for value, label in role_options %}
+                <option value="{{ value }}" {% if role == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-300 mb-2" for="sort">Sort by</label>
+            <select id="sort"
+                    name="sort"
+                    class="w-full px-3 py-2.5 rounded-md bg-[#20252a] border border-gray-700 text-gray-100">
+              {% for value, label in sort_options %}
+                <option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit"
+                  class="px-4 py-2.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Find shows</button>
+        </div>
+        <a href="{% url 'discover_tv_by_person' %}"
+           class="inline-block mt-3 text-sm text-indigo-300 hover:text-indigo-200">Choose a different person</a>
+      </form>
+
+      <section class="bg-[#2a2f35] rounded-lg p-5">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-700 pb-3 mb-2">
+          <h3 class="text-lg font-semibold">
+            {% if role == "all" %}
+              All TV credits
+            {% else %}
+              {% for value, label in role_options %}{% if role == value %}{{ label }}{% endif %}{% endfor %} credits
+            {% endif %}
+            for {{ person_name|default:"selected person" }}
+          </h3>
+          <span class="text-sm text-gray-400">{{ credits|length }} show{{ credits|length|pluralize }}</span>
+        </div>
+        {% if credits %}
+          <div class="person-tv-grid">
+            {% for credit in credits %}
+              <article class="person-tv-card">
+                <a href="{% url 'media_details' source='tmdb' media_type='tv' media_id=credit.media_id title=credit.title|slugify %}"
+                   title="{{ credit.title }}">
+                  <img src="{{ credit.image }}"
+                       alt=""
+                       class="person-tv-poster"
+                       loading="lazy">
+                </a>
+                <div class="person-tv-copy">
+                  <a href="{% url 'media_details' source='tmdb' media_type='tv' media_id=credit.media_id title=credit.title|slugify %}"
+                     class="person-tv-title hover:text-indigo-300">{{ credit.title }}</a>
+                  <div class="person-tv-meta">{{ credit.first_air_date|slice:":4" }}</div>
+                  <div class="person-tv-role">{{ credit.role }}</div>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="text-center py-12 text-gray-400">No TV credits found for this person and role.</div>
+        {% endif %}
+        <p class="text-xs text-gray-500 mt-3">Credits and images provided by TMDB.</p>
+      </section>
+    {% else %}
+      <form method="get"
+            action="{% url 'discover_tv_by_person' %}"
+            class="bg-[#2a2f35] rounded-lg p-5 mb-6">
+        <label class="block text-sm text-gray-300 mb-2" for="person-query">Find a person</label>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <input id="person-query"
+                 type="search"
+                 name="q"
+                 value="{{ query }}"
+                 minlength="2"
+                 placeholder="Start typing a name…"
+                 class="grow min-w-0 px-3 py-2.5 rounded-md bg-[#20252a] border border-gray-700 text-gray-100 placeholder-gray-500">
+          <button type="submit"
+                  class="px-4 py-2.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Search people</button>
+        </div>
+        <p class="text-xs text-gray-500 mt-2">Search people in TMDB, then browse their TV credits.</p>
+      </form>
+
+      {% if query %}
+        <section class="bg-[#2a2f35] rounded-lg p-5">
+          <h3 class="text-lg font-semibold border-b border-gray-700 pb-3 mb-2">People matching “{{ query }}”</h3>
+          {% if people %}
+            <div class="divide-y divide-gray-700">
+              {% for person in people %}
+                <form method="get"
+                      action="{% url 'discover_tv_by_person' %}"
+                      class="flex items-center gap-4 py-3">
+                  <input type="hidden" name="person_id" value="{{ person.person_id }}">
+                  <input type="hidden" name="person_name" value="{{ person.name }}">
+                  <input type="hidden" name="role" value="all">
+                  <img src="{{ person.image }}"
+                       alt=""
+                       class="rounded-full bg-[#20252a]"
+                       style="width: 3rem;
+                              height: 3rem;
+                              flex: 0 0 3rem;
+                              object-fit: cover"
+                       loading="lazy">
+                  <div class="grow min-w-0">
+                    <div class="font-medium">{{ person.name }}</div>
+                    <div class="text-sm text-gray-400">{{ person.known_for|default:"TMDB person" }}</div>
+                  </div>
+                  <button type="submit"
+                          class="px-3 py-2 rounded-md bg-[#39404b] hover:bg-[#454d5a] text-sm">View shows</button>
+                </form>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="py-8 text-center text-gray-400">No people found. Try another spelling or name.</p>
+          {% endif %}
+        </section>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock content %}

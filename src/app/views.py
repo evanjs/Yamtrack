@@ -264,6 +264,12 @@ PERSON_DISCOVERY_SORTS = (
     ("title_asc", "Title (A-Z)"),
     ("title_desc", "Title (Z-A)"),
 )
+PERSON_TV_DISCOVERY_SORTS = (
+    ("release_desc", "First air date — newest first"),
+    ("release_asc", "First air date — oldest first"),
+    ("title_asc", "Title (A-Z)"),
+    ("title_desc", "Title (Z-A)"),
+)
 
 
 @require_GET
@@ -308,6 +314,48 @@ def discover_by_person(request):
             "role_options": PERSON_DISCOVERY_ROLES,
             "sort": sort,
             "sort_options": PERSON_DISCOVERY_SORTS,
+        },
+    )
+
+
+@require_GET
+def discover_tv_by_person(request):
+    """Search TMDB people or browse one person's TV credits."""
+    query = request.GET.get("q", "").strip()
+    person_id = request.GET.get("person_id", "").strip()
+    person_name = request.GET.get("person_name", "").strip()[:200]
+    role = request.GET.get("role", "all").strip().casefold()
+    valid_roles = {value for value, _label in PERSON_DISCOVERY_ROLES}
+    if role not in valid_roles:
+        role = "all"
+    sort = request.GET.get("sort", "release_desc").strip().casefold()
+    valid_sorts = {value for value, _label in PERSON_DISCOVERY_SORTS}
+    if sort not in valid_sorts:
+        sort = "release_desc"
+
+    people = []
+    credits = []
+    if person_id.isdecimal() and int(person_id) > 0:
+        credits = tmdb.person_tv_credits(person_id, role, sort)
+    else:
+        person_id = ""
+        person_name = ""
+        if len(query) >= TMDB_CREDIT_SEARCH_MIN_LENGTH:
+            people = tmdb.search_people(query)
+
+    return render(
+        request,
+        "app/discover_tv_by_person.html",
+        {
+            "query": query,
+            "people": people,
+            "credits": credits,
+            "person_id": person_id,
+            "person_name": person_name,
+            "role": role,
+            "role_options": PERSON_DISCOVERY_ROLES,
+            "sort": sort,
+            "sort_options": PERSON_TV_DISCOVERY_SORTS,
         },
     )
 
