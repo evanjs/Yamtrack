@@ -134,21 +134,10 @@
         {% if credits %}
           <div class="person-tv-grid">
             {% for credit in credits %}
-              <article class="person-tv-card">
-                <a href="{% url 'media_details' source='tmdb' media_type='tv' media_id=credit.media_id title=credit.title|slugify %}"
-                   title="{{ credit.title }}">
-                  <img src="{{ credit.image }}"
-                       alt=""
-                       class="person-tv-poster"
-                       loading="lazy">
-                </a>
-                <div class="person-tv-copy">
-                  <a href="{% url 'media_details' source='tmdb' media_type='tv' media_id=credit.media_id title=credit.title|slugify %}"
-                     class="person-tv-title hover:text-indigo-300">{{ credit.title }}</a>
-                  <div class="person-tv-meta">{{ credit.first_air_date|slice:":4" }}</div>
-                  <div class="person-tv-role">{{ credit.role }}</div>
-                </div>
-              </article>
+              <div>
+                {% include "app/components/media_card.html" with item=credit.item title=credit.title media=None from_grid=True %}
+                <div class="person-tv-role px-2">{{ credit.role }}</div>
+              </div>
             {% endfor %}
           </div>
         {% else %}

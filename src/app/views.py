@@ -295,6 +295,14 @@ def discover_by_person(request):
         for credit in movie_results:
             age = calculate_age_on_date(birthday, credit.get("release_date"))
             credit["age_at_release"] = f"{age} yo" if age is not None else ""
+            credit["item"] = {
+                "source": Sources.TMDB.value,
+                "media_type": MediaTypes.MOVIE.value,
+                "media_id": str(credit["media_id"]),
+                "title": credit["title"],
+                "image": credit.get("image") or settings.IMG_NONE,
+                "release_year": (credit.get("release_date") or "")[:4],
+            }
     else:
         person_id = ""
         person_name = ""
@@ -337,6 +345,15 @@ def discover_tv_by_person(request):
     credits = []
     if person_id.isdecimal() and int(person_id) > 0:
         credits = tmdb.person_tv_credits(person_id, role, sort)
+        for credit in credits:
+            credit["item"] = {
+                "source": Sources.TMDB.value,
+                "media_type": MediaTypes.TV.value,
+                "media_id": str(credit["media_id"]),
+                "title": credit["title"],
+                "image": credit.get("image") or settings.IMG_NONE,
+                "release_year": (credit.get("first_air_date") or "")[:4],
+            }
     else:
         person_id = ""
         person_name = ""

@@ -69,8 +69,10 @@ class PersonDiscoveryViewTests(TestCase):
         self.assertContains(response, "27 yo")
         self.assertContains(response, "title_asc")
         self.assertContains(response, 'class="person-movie-grid"')
-        self.assertContains(response, 'class="person-movie-card"')
-        self.assertContains(response, 'class="person-movie-poster"')
+        self.assertContains(response, 'hx-get="/track_modal/tmdb/movie/1234"')
+        self.assertContains(response, 'title="Add to tracker"')
+        self.assertContains(response, 'title="Add to custom lists"')
+        self.assertContains(response, 'title="View your activity history"')
         self.assertContains(response, "repeat(2, minmax(0, 1fr))")
         mock_credits.assert_called_once_with("123", "director", "title_asc")
         mock_birthday.assert_called_once_with("123")
@@ -98,6 +100,8 @@ class PersonDiscoveryViewTests(TestCase):
         self.assertContains(response, "Friends")
         self.assertContains(response, "1994")
         self.assertContains(response, "/details/tmdb/tv/1668/friends")
+        self.assertContains(response, 'hx-get="/track_modal/tmdb/tv/1668"')
+        self.assertContains(response, 'title="Add to tracker"')
         mock_credits.assert_called_once_with("123", "all", "release_desc")
 
 

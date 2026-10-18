@@ -139,27 +139,15 @@
         {% if credits %}
           <div class="person-movie-grid">
             {% for credit in credits %}
-              <article class="person-movie-card">
-                <a href="{% url 'media_details' source='tmdb' media_type='movie' media_id=credit.media_id title=credit.title|slugify %}"
-                   title="{{ credit.title }}">
-                  <img src="{{ credit.image }}"
-                       alt=""
-                       class="person-movie-poster"
-                       loading="lazy">
-                </a>
-                <div class="person-movie-copy">
-                  <a href="{% url 'media_details' source='tmdb' media_type='movie' media_id=credit.media_id title=credit.title|slugify %}"
-                     class="person-movie-title hover:text-indigo-300">{{ credit.title }}</a>
-                  <div class="person-movie-meta">
-                    {{ credit.release_date|slice:":4" }}{% if credit.age_at_release %} ({{ credit.age_at_release }}){% endif %}
-                  </div>
-                  <div class="person-movie-role">{{ credit.role }}</div>
-                </div>
+              <div>
+                {% include "app/components/media_card.html" with item=credit.item title=credit.title media=None from_grid=True %}
+                <div class="person-movie-role px-2">{{ credit.role }}</div>
+                {% if credit.age_at_release %}<div class="person-movie-meta px-2">{{ credit.age_at_release }} at release</div>{% endif %}
                 <a href="https://www.themoviedb.org/movie/{{ credit.media_id }}"
                    target="_blank"
                    rel="noopener noreferrer"
                    class="person-movie-source hover:text-gray-200">TMDB ↗</a>
-              </article>
+              </div>
             {% endfor %}
           </div>
         {% else %}
