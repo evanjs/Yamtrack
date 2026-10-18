@@ -140,7 +140,7 @@
           <div class="person-movie-grid">
             {% for credit in credits %}
               <div>
-                {% include "app/components/media_card.html" with item=credit.item title=credit.title media=None from_grid=True %}
+                {% include "app/components/media_card.html" with item=credit.item title=credit.title media=credit.media from_grid=True %}
                 <div class="person-movie-role px-2">{{ credit.role }}</div>
                 {% if credit.age_at_release %}<div class="person-movie-meta px-2">{{ credit.age_at_release }} at release</div>{% endif %}
                 <a href="https://www.themoviedb.org/movie/{{ credit.media_id }}"

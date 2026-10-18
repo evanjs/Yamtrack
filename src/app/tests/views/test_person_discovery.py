@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from app.models import Item, Movie
 from app.views import calculate_age_on_date
 
 
@@ -76,6 +77,31 @@ class PersonDiscoveryViewTests(TestCase):
         self.assertContains(response, "repeat(2, minmax(0, 1fr))")
         mock_credits.assert_called_once_with("123", "director", "title_asc")
         mock_birthday.assert_called_once_with("123")
+
+    @patch("app.providers.tmdb.person_birthday", return_value=None)
+    @patch("app.providers.tmdb.person_movie_credits")
+    def test_movie_credit_shows_viewer_tracking_progress(self, mock_credits, _birthday):
+        """Show progress only when the current user tracks the credited movie."""
+        mock_credits.return_value = [
+            {"media_id": "1234", "title": "A movie", "release_date": "2020-01-01", "role": "Actor"},
+        ]
+        user = get_user_model().objects.get(username="person-search")
+        item = Item.objects.create(
+            media_id="1234",
+            source="tmdb",
+            media_type="movie",
+            title="A movie",
+            image="https://example.com/a.jpg",
+        )
+        Movie.objects.bulk_create(
+            [Movie(user=user, item=item, progress=1, status="In progress")],
+        )
+
+        response = self.client.get(reverse("discover_by_person"), {"person_id": "123"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "person-movie-grid")
+        self.assertContains(response, "h-1.25")
 
     @patch("app.providers.tmdb.person_tv_credits")
     def test_tv_discovery_renders_selected_person_credits(self, mock_credits):

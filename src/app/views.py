@@ -292,9 +292,17 @@ def discover_by_person(request):
     if person_id.isdecimal() and int(person_id) > 0:
         movie_results = tmdb.person_movie_credits(person_id, role, sort)
         birthday = tmdb.person_birthday(person_id)
+        tracked_movies = Movie.objects.filter(
+            user=request.user,
+            item__source=Sources.TMDB.value,
+            item__media_type=MediaTypes.MOVIE.value,
+            item__media_id__in=[str(credit["media_id"]) for credit in movie_results],
+        ).select_related("item")
+        tracked_by_id = {media.item.media_id: media for media in tracked_movies}
         for credit in movie_results:
             age = calculate_age_on_date(birthday, credit.get("release_date"))
             credit["age_at_release"] = f"{age} yo" if age is not None else ""
+            credit["media"] = tracked_by_id.get(str(credit["media_id"]))
             credit["item"] = {
                 "source": Sources.TMDB.value,
                 "media_type": MediaTypes.MOVIE.value,
@@ -345,7 +353,15 @@ def discover_tv_by_person(request):
     credits = []
     if person_id.isdecimal() and int(person_id) > 0:
         credits = tmdb.person_tv_credits(person_id, role, sort)
+        tracked_shows = TV.objects.filter(
+            user=request.user,
+            item__source=Sources.TMDB.value,
+            item__media_type=MediaTypes.TV.value,
+            item__media_id__in=[str(credit["media_id"]) for credit in credits],
+        ).select_related("item").prefetch_related("seasons")
+        tracked_by_id = {media.item.media_id: media for media in tracked_shows}
         for credit in credits:
+            credit["media"] = tracked_by_id.get(str(credit["media_id"]))
             credit["item"] = {
                 "source": Sources.TMDB.value,
                 "media_type": MediaTypes.TV.value,
