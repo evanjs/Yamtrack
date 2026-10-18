@@ -76,14 +76,14 @@
 
     @media (min-width: 900px) {
       .person-credit-controls {
-        grid-template-columns: minmax(0, 1fr) 11rem 13rem auto;
+        grid-template-columns: minmax(0, 1fr) 11rem 11rem 13rem auto;
         align-items: end;
       }
     }
   </style>
   <div class="max-w-5xl mx-auto">
-    <h2 class="text-2xl font-bold mb-2">Discover movies by person</h2>
-    <p class="text-gray-400 mb-6">Find movies from someone's cast and crew credits, whether or not they're in your library.</p>
+    <h2 class="text-2xl font-bold mb-2">Discover by person</h2>
+    <p class="text-gray-400 mb-6">Find movies and TV shows from someone's cast and crew credits, whether or not they're in your library.</p>
 
     {% if person_id %}
       <form method="get"
@@ -96,6 +96,16 @@
             <label class="block text-sm text-gray-300 mb-2" for="person-name">Person</label>
             <div id="person-name"
                  class="px-3 py-2.5 rounded-md bg-[#20252a] border border-gray-700">{{ person_name|default:"Selected person" }}</div>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-300 mb-2" for="media-type">Media type</label>
+            <select id="media-type"
+                    name="media_type"
+                    class="w-full px-3 py-2.5 rounded-md bg-[#20252a] border border-gray-700 text-gray-100">
+              {% for value, label in media_type_options %}
+                <option value="{{ value }}" {% if media_filter == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
           </div>
           <div>
             <label class="block text-sm text-gray-300 mb-2" for="role">Credit role</label>
@@ -118,7 +128,7 @@
             </select>
           </div>
           <button type="submit"
-                  class="px-4 py-2.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Find movies</button>
+                  class="px-4 py-2.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Find credits</button>
         </div>
         <a href="{% url 'discover_by_person' %}"
            class="inline-block mt-3 text-sm text-indigo-300 hover:text-indigo-200">Choose a different person</a>
@@ -128,22 +138,30 @@
         <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-700 pb-3 mb-2">
           <h3 class="text-lg font-semibold">
             {% if role == "all" %}
-              All movie credits
+              {% if media_filter == "both" %}
+                All movie and TV credits
+              {% elif media_filter == "tv" %}
+                All TV credits
+              {% else %}
+                All movie credits
+              {% endif %}
             {% else %}
               {% for value, label in role_options %}{% if role == value %}{{ label }}{% endif %}{% endfor %} credits
             {% endif %}
             for {{ person_name|default:"selected person" }}
           </h3>
-          <span class="text-sm text-gray-400">{{ credits|length }} movie{{ credits|length|pluralize }}</span>
+          <span class="text-sm text-gray-400">{{ all_credits|length }} credit{{ all_credits|length|pluralize }}</span>
         </div>
-        {% if credits %}
+        {% if all_credits %}
           <div class="person-movie-grid">
-            {% for credit in credits %}
+            {% for credit in all_credits %}
               <div>
                 {% include "app/components/media_card.html" with item=credit.item title=credit.title media=credit.media from_grid=True %}
                 <div class="person-movie-role px-2">{{ credit.role }}</div>
-                {% if credit.age_at_release %}<div class="person-movie-meta px-2">{{ credit.age_at_release }} at release</div>{% endif %}
-                <a href="https://www.themoviedb.org/movie/{{ credit.media_id }}"
+                {% if credit.media_type == "movie" and credit.age_at_release %}<div class="person-movie-meta px-2">{{ credit.age_at_release }} at release</div>{% endif %}
+                {% if credit.media_type == "tv" and credit.age_at_first_air %}<div class="person-movie-meta px-2">{{ credit.age_at_first_air }} at first air</div>{% endif %}
+                <div class="person-movie-meta px-2">{% if credit.media_type == "tv" %}First air date{% else %}Release date{% endif %}: {{ credit.display_date|default:"Unknown" }}</div>
+                <a href="https://www.themoviedb.org/{% if credit.media_type == 'tv' %}tv{% else %}movie{% endif %}/{{ credit.media_id }}"
                    target="_blank"
                    rel="noopener noreferrer"
                    class="person-movie-source hover:text-gray-200">TMDB ↗</a>
@@ -151,9 +169,10 @@
             {% endfor %}
           </div>
         {% else %}
-          <div class="text-center py-12 text-gray-400">No movie credits found for this person and role.</div>
+          <div class="text-center py-12 text-gray-400">No credits found for this person and role.</div>
         {% endif %}
-        <p class="text-xs text-gray-500 mt-3">Age uses the release date as an estimate; TMDB does not provide filming dates per movie. Credits and images provided by TMDB.</p>
+        {% if credits %}<p class="text-xs text-gray-500 mt-3">Age uses the release date as an estimate; TMDB does not provide filming dates per movie.</p>{% endif %}
+        <p class="text-xs text-gray-500 mt-1">Credits and images provided by TMDB.</p>
       </section>
     {% else %}
       <form method="get"
@@ -171,7 +190,7 @@
           <button type="submit"
                   class="px-4 py-2.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Search people</button>
         </div>
-        <p class="text-xs text-gray-500 mt-2">Search people in TMDB, then browse their movie credits.</p>
+        <p class="text-xs text-gray-500 mt-2">Search people in TMDB, then browse their movie and TV credits.</p>
       </form>
 
       {% if query %}
@@ -186,6 +205,7 @@
                   <input type="hidden" name="person_id" value="{{ person.person_id }}">
                   <input type="hidden" name="person_name" value="{{ person.name }}">
                   <input type="hidden" name="role" value="all">
+                  <input type="hidden" name="media_type" value="{{ media_filter }}">
                   <img src="{{ person.image }}"
                        alt=""
                        class="rounded-full bg-[#20252a]"

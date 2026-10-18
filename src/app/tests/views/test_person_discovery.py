@@ -17,6 +17,93 @@ class PersonDiscoveryViewTests(TestCase):
         get_user_model().objects.create_user(**self.credentials)
         self.client.login(**self.credentials)
 
+    @patch("app.providers.tmdb.person_tv_credits", return_value=[])
+    @patch("app.providers.tmdb.person_movie_credits", return_value=[])
+    def test_unified_discovery_defaults_to_both_media_types(
+        self, mock_movie_credits, mock_tv_credits
+    ):
+        """Discover both media types when no filter hint is provided."""
+        response = self.client.get(
+            reverse("discover_by_person"),
+            {"person_id": "123", "person_name": "A Person"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["media_filter"], "both")
+        mock_movie_credits.assert_called_once_with("123", "all", "release_desc")
+        mock_tv_credits.assert_called_once_with("123", "all", "release_desc")
+
+    @patch("app.providers.tmdb.person_birthday", return_value=None)
+    @patch("app.providers.tmdb.person_tv_credits", return_value=[])
+    @patch("app.providers.tmdb.person_movie_credits")
+    def test_media_type_hint_limits_discovery_to_movies(
+        self, mock_movie_credits, mock_tv_credits, _mock_birthday
+    ):
+        """A movie hint calls only the movie credits provider."""
+        mock_movie_credits.return_value = []
+
+        response = self.client.get(
+            reverse("discover_by_person"),
+            {"person_id": "123", "media_type": "movie"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["media_filter"], "movie")
+        mock_movie_credits.assert_called_once_with("123", "all", "release_desc")
+        mock_tv_credits.assert_not_called()
+
+    @patch("app.providers.tmdb.person_birthday", return_value="1960-01-01")
+    @patch("app.providers.tmdb.person_tv_credits", return_value=[])
+    @patch("app.providers.tmdb.person_movie_credits")
+    def test_media_type_hint_limits_discovery_to_tv(
+        self, mock_movie_credits, mock_tv_credits, _mock_birthday
+    ):
+        """A TV hint calls only the TV credits provider."""
+        response = self.client.get(
+            reverse("discover_by_person"),
+            {"person_id": "123", "media_type": "tv"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["media_filter"], "tv")
+        mock_tv_credits.assert_called_once_with("123", "all", "release_desc")
+        mock_movie_credits.assert_not_called()
+
+    @patch("app.providers.tmdb.person_birthday", return_value="1960-01-01")
+    @patch("app.providers.tmdb.person_tv_credits")
+    @patch("app.providers.tmdb.person_movie_credits")
+    def test_both_media_types_merge_by_primary_date_and_show_type_specific_age(
+        self, mock_movie_credits, mock_tv_credits, _mock_birthday
+    ):
+        """Mixed results use their own date and age basis, then date ordering."""
+        mock_movie_credits.return_value = [
+            {
+                "media_id": "1",
+                "title": "Z Movie",
+                "release_date": "2000-01-01",
+                "role": "Actor",
+            },
+        ]
+        mock_tv_credits.return_value = [
+            {
+                "media_id": "2",
+                "title": "A Show",
+                "first_air_date": "2001-01-01",
+                "role": "Actor",
+            },
+        ]
+
+        response = self.client.get(
+            reverse("discover_by_person"),
+            {"person_id": "123", "person_name": "A Person"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        results = response.context["all_credits"]
+        self.assertEqual([credit["title"] for credit in results], ["A Show", "Z Movie"])
+        self.assertEqual(results[0]["age_at_first_air"], "41 yo")
+        self.assertEqual(results[1]["age_at_release"], "40 yo")
+
     @patch("app.providers.tmdb.search_people")
     def test_person_query_renders_person_choices(self, mock_search_people):
         """Render TMDB person search matches."""
@@ -83,7 +170,12 @@ class PersonDiscoveryViewTests(TestCase):
     def test_movie_credit_shows_viewer_tracking_progress(self, mock_credits, _birthday):
         """Show progress only when the current user tracks the credited movie."""
         mock_credits.return_value = [
-            {"media_id": "1234", "title": "A movie", "release_date": "2020-01-01", "role": "Actor"},
+            {
+                "media_id": "1234",
+                "title": "A movie",
+                "release_date": "2020-01-01",
+                "role": "Actor",
+            },
         ]
         user = get_user_model().objects.get(username="person-search")
         item = Item.objects.create(

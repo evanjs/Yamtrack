@@ -270,14 +270,104 @@ PERSON_TV_DISCOVERY_SORTS = (
     ("title_asc", "Title (A-Z)"),
     ("title_desc", "Title (Z-A)"),
 )
+PERSON_MIXED_DISCOVERY_SORTS = (
+    ("release_desc", "Date — newest first"),
+    ("release_asc", "Date — oldest first"),
+    ("title_asc", "Title (A-Z)"),
+    ("title_desc", "Title (Z-A)"),
+)
+
+
+def _person_discovery_results(user, person_id, role, sort, media_type):
+    """Fetch and prepare the selected movie/TV credits for one person."""
+    movies = (
+        tmdb.person_movie_credits(person_id, role, sort)
+        if media_type in {"both", MediaTypes.MOVIE.value}
+        else []
+    )
+    shows = (
+        tmdb.person_tv_credits(person_id, role, sort)
+        if media_type in {"both", MediaTypes.TV.value}
+        else []
+    )
+    birthday = tmdb.person_birthday(person_id) if movies or shows else None
+    _prepare_movie_credits(user, movies, birthday)
+    _prepare_tv_credits(user, shows, birthday)
+    combined = movies + shows
+    _sort_person_credits(combined, sort)
+    return movies, shows, combined
+
+
+def _prepare_movie_credits(user, credits, birthday):
+    """Add viewer tracking, card data, and age-at-release to movie credits."""
+    tracked = Movie.objects.filter(
+        user=user,
+        item__source=Sources.TMDB.value,
+        item__media_type=MediaTypes.MOVIE.value,
+        item__media_id__in=[str(credit["media_id"]) for credit in credits],
+    ).select_related("item")
+    tracked_by_id = {media.item.media_id: media for media in tracked}
+    for credit in credits:
+        age = calculate_age_on_date(birthday, credit.get("release_date"))
+        credit["age_at_release"] = f"{age} yo" if age is not None else ""
+        credit["media"] = tracked_by_id.get(str(credit["media_id"]))
+        credit["media_type"] = MediaTypes.MOVIE.value
+        credit["display_date"] = credit.get("release_date")
+        credit["item"] = {
+            "source": Sources.TMDB.value,
+            "media_type": MediaTypes.MOVIE.value,
+            "media_id": str(credit["media_id"]),
+            "title": credit["title"],
+            "image": credit.get("image") or settings.IMG_NONE,
+            "release_year": (credit.get("release_date") or "")[:4],
+        }
+
+
+def _prepare_tv_credits(user, credits, birthday):
+    """Add viewer tracking, card data, and age-at-first-air to TV credits."""
+    tracked = TV.objects.filter(
+        user=user,
+        item__source=Sources.TMDB.value,
+        item__media_type=MediaTypes.TV.value,
+        item__media_id__in=[str(credit["media_id"]) for credit in credits],
+    ).select_related("item").prefetch_related("seasons")
+    tracked_by_id = {media.item.media_id: media for media in tracked}
+    for credit in credits:
+        age = calculate_age_on_date(birthday, credit.get("first_air_date"))
+        credit["age_at_first_air"] = f"{age} yo" if age is not None else ""
+        credit["media"] = tracked_by_id.get(str(credit["media_id"]))
+        credit["media_type"] = MediaTypes.TV.value
+        credit["display_date"] = credit.get("first_air_date")
+        credit["item"] = {
+            "source": Sources.TMDB.value,
+            "media_type": MediaTypes.TV.value,
+            "media_id": str(credit["media_id"]),
+            "title": credit["title"],
+            "image": credit.get("image") or settings.IMG_NONE,
+            "release_year": (credit.get("first_air_date") or "")[:4],
+        }
+
+
+def _sort_person_credits(credits, sort):
+    """Sort mixed credits using their type-specific primary date and title."""
+    by_title = lambda credit: credit["title"].casefold()
+    by_date = lambda credit: credit.get("release_date") or credit.get("first_air_date") or ""
+    credits.sort(key=by_title)
+    if sort in {"title_asc", "title_desc"}:
+        credits.sort(key=by_title, reverse=sort == "title_desc")
+    else:
+        credits.sort(key=by_date, reverse=sort != "release_asc")
 
 
 @require_GET
 def discover_by_person(request):
-    """Search TMDB people or browse one person's movie credits."""
+    """Search TMDB people or browse movie and TV credits for one person."""
     query = request.GET.get("q", "").strip()
     person_id = request.GET.get("person_id", "").strip()
     person_name = request.GET.get("person_name", "").strip()[:200]
+    media_type = request.GET.get("media_type", "both").strip().casefold()
+    if media_type not in {"both", MediaTypes.MOVIE.value, MediaTypes.TV.value}:
+        media_type = "both"
     role = request.GET.get("role", "all").strip().casefold()
     valid_roles = {value for value, _label in PERSON_DISCOVERY_ROLES}
     if role not in valid_roles:
@@ -289,28 +379,12 @@ def discover_by_person(request):
 
     people = []
     movie_results = []
+    tv_results = []
+    combined_results = []
     if person_id.isdecimal() and int(person_id) > 0:
-        movie_results = tmdb.person_movie_credits(person_id, role, sort)
-        birthday = tmdb.person_birthday(person_id)
-        tracked_movies = Movie.objects.filter(
-            user=request.user,
-            item__source=Sources.TMDB.value,
-            item__media_type=MediaTypes.MOVIE.value,
-            item__media_id__in=[str(credit["media_id"]) for credit in movie_results],
-        ).select_related("item")
-        tracked_by_id = {media.item.media_id: media for media in tracked_movies}
-        for credit in movie_results:
-            age = calculate_age_on_date(birthday, credit.get("release_date"))
-            credit["age_at_release"] = f"{age} yo" if age is not None else ""
-            credit["media"] = tracked_by_id.get(str(credit["media_id"]))
-            credit["item"] = {
-                "source": Sources.TMDB.value,
-                "media_type": MediaTypes.MOVIE.value,
-                "media_id": str(credit["media_id"]),
-                "title": credit["title"],
-                "image": credit.get("image") or settings.IMG_NONE,
-                "release_year": (credit.get("release_date") or "")[:4],
-            }
+        movie_results, tv_results, combined_results = _person_discovery_results(
+            request.user, person_id, role, sort, media_type
+        )
     else:
         person_id = ""
         person_name = ""
@@ -324,12 +398,26 @@ def discover_by_person(request):
             "query": query,
             "people": people,
             "credits": movie_results,
+            "tv_credits": tv_results,
+            "all_credits": combined_results,
+            "media_filter": media_type,
+            "media_type_options": (
+                ("both", "Both"),
+                (MediaTypes.MOVIE.value, "Movies"),
+                (MediaTypes.TV.value, "TV"),
+            ),
             "person_id": person_id,
             "person_name": person_name,
             "role": role,
             "role_options": PERSON_DISCOVERY_ROLES,
             "sort": sort,
-            "sort_options": PERSON_DISCOVERY_SORTS,
+            "sort_options": (
+                PERSON_TV_DISCOVERY_SORTS
+                if media_type == MediaTypes.TV.value
+                else PERSON_MIXED_DISCOVERY_SORTS
+                if media_type == "both"
+                else PERSON_DISCOVERY_SORTS
+            ),
         },
     )
 

@@ -217,7 +217,7 @@ class MediaDetailsViewTests(TestCase):
         )
         self.assertContains(
             response,
-            'href="/discover/person?person_id=678&amp;person_name=Linnea%20Quigley&amp;role=cast"',
+            'href="/discover/person?person_id=678&amp;person_name=Linnea%20Quigley&amp;role=cast&amp;media_type=movie"',
         )
 
     @patch("app.providers.services.get_media_metadata")

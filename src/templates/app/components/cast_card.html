@@ -32,9 +32,9 @@
                    min-height: 1rem">Age…</span>
     {% endif %}
     {% if cast.id %}
-      <a href="{% url 'discover_by_person' %}?person_id={{ cast.id }}&amp;person_name={{ cast.name|urlencode }}&amp;role=cast"
-         aria-label="Search movies with {{ cast.name }} in Yamtrack"
-         title="Search movies with {{ cast.name }} in Yamtrack"
+      <a href="{% url 'discover_by_person' %}?person_id={{ cast.id }}&amp;person_name={{ cast.name|urlencode }}&amp;role=cast&amp;media_type={{ media_type }}"
+         aria-label="Search {% if media_type == 'tv' %}TV{% else %}movies{% endif %} with {{ cast.name }} in Yamtrack"
+         title="Search {% if media_type == 'tv' %}TV{% else %}movies{% endif %} with {{ cast.name }} in Yamtrack"
          class="inline-flex items-center gap-1 mt-1 text-xs text-indigo-300 hover:text-indigo-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400">
         {% include "app/icons/magnifying-glass.svg" with classes="w-3 h-3" %}
         <span>Search Yamtrack</span>
