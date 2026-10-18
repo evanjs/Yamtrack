@@ -470,6 +470,7 @@ def get_steam_store_links(response):
     if uid:
         return {
             "Steam": f"https://store.steampowered.com/app/{uid}/",
+            "ProtonDB": f"https://www.protondb.com/app/{uid}",
             "PCGamingWiki": (
                 "https://www.pcgamingwiki.com/api/appid.php?appid="
                 f"{uid}"
