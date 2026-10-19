@@ -598,6 +598,82 @@ class Metadata(TestCase):
     @patch("app.providers.tmdb.cache.set")
     @patch("app.providers.tmdb.cache.get", return_value=None)
     @patch("app.providers.tmdb.services.api_request")
+    def test_movie_returns_all_release_certifications_by_country(
+        self,
+        mock_api_request,
+        _mock_cache_get,
+        _mock_cache_set,
+    ):
+        """Movie metadata preserves distinct release certification entries."""
+        mock_api_request.side_effect = [
+            {
+                "id": 321,
+                "title": "Example Movie",
+                "poster_path": None,
+                "overview": "An example.",
+                "genres": [],
+                "vote_average": 0,
+                "vote_count": 0,
+                "recommendations": {"results": []},
+                "release_date": "2024-01-01",
+                "status": "Released",
+                "runtime": 90,
+                "production_companies": [],
+                "production_countries": [],
+                "spoken_languages": [],
+                "release_dates": {
+                    "results": [
+                        {
+                            "iso_3166_1": "US",
+                            "release_dates": [
+                                {
+                                    "certification": "R",
+                                    "type": 3,
+                                    "release_date": "2024-01-01",
+                                },
+                                {
+                                    "certification": "R",
+                                    "type": 4,
+                                    "release_date": "2024-02-01",
+                                },
+                                {
+                                    "certification": "PG-13",
+                                    "type": 3,
+                                    "release_date": "2024-03-01",
+                                },
+                                {
+                                    "certification": "",
+                                    "type": 3,
+                                    "release_date": "2024-04-01",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+            {"keywords": []},
+        ]
+
+        metadata = tmdb.movie("321")
+
+        self.assertEqual(
+            metadata["tmdb_movie_ratings"],
+            {
+                "US": [
+                    {"certification": "R", "type": 3, "release_date": "2024-01-01"},
+                    {"certification": "R", "type": 4, "release_date": "2024-02-01"},
+                    {"certification": "PG-13", "type": 3, "release_date": "2024-03-01"},
+                ],
+            },
+        )
+        self.assertIn(
+            "release_dates",
+            mock_api_request.call_args_list[0].kwargs["params"]["append_to_response"],
+        )
+
+    @patch("app.providers.tmdb.cache.set")
+    @patch("app.providers.tmdb.cache.get", return_value=None)
+    @patch("app.providers.tmdb.services.api_request")
     def test_movie_keyword_timeout_preserves_primary_movie_metadata(
         self,
         mock_api_request,

@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 TMDB_TAXONOMY_REFRESH_AFTER = timedelta(days=30)
 TMDB_TAXONOMY_EVICT_AFTER = timedelta(days=150)
 TMDB_TAXONOMY_RETRY_AFTER = timedelta(days=1)
+TMDB_CONTENT_RATING_REFRESH_AFTER = timedelta(days=30)
+TMDB_CONTENT_RATING_EVICT_AFTER = timedelta(days=150)
+TMDB_CONTENT_RATING_RETRY_AFTER = timedelta(days=1)
 STEAM_METADATA_REFRESH_AFTER = timedelta(days=30)
 STEAM_METADATA_RETRY_AFTER = timedelta(days=1)
 
@@ -375,6 +378,28 @@ class IGDBGameTaxonomyAssignment(models.Model):
         return f"{self.metadata.item} — {self.taxonomy.kind}: {self.taxonomy.name}"
 
 
+class TMDBContentRatingMetadata(models.Model):
+    """Persist TMDB movie certifications or TV content ratings for an Item."""
+
+    item = models.OneToOneField(
+        Item,
+        on_delete=models.CASCADE,
+        related_name="tmdb_content_rating_metadata",
+    )
+    ratings = models.JSONField(default=dict)
+    synced_at = models.DateTimeField(null=True, blank=True)
+    last_attempted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        """Model options for durable TMDB rating metadata."""
+
+        indexes = [models.Index(fields=["synced_at", "last_attempted_at"])]
+
+    def __str__(self):
+        """Return the associated TMDB Item title."""
+        return f"TMDB content ratings for {self.item}"
+
+
 class TMDBMovieTaxonomy(models.Model):
     """TMDB movie taxonomy value with identity distinct by facet kind."""
 
@@ -585,7 +610,10 @@ class MediaManager(models.Manager):
             ),
         ).filter(row_number=1)
 
-        queryset = queryset.select_related("item")
+        queryset = queryset.select_related(
+            "item",
+            "item__tmdb_content_rating_metadata",
+        )
         queryset = self._apply_prefetch_related(queryset, media_type)
 
         if sort_filter:

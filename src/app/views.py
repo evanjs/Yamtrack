@@ -26,8 +26,10 @@ from app.metadata import (
     get_igdb_rating_for_steam,
     get_local_steam_rating_icon_path,
     get_steam_rating_value,
+    get_tmdb_content_rating_display,
     mark_tmdb_movie_taxonomy_attempt,
     store_igdb_game_taxonomies,
+    store_tmdb_content_ratings,
     store_tmdb_movie_credits,
     store_tmdb_movie_taxonomies,
 )
@@ -96,6 +98,47 @@ def _persist_tmdb_taxonomies_for_item(item, metadata):
         mark_tmdb_movie_taxonomy_attempt(item)
     if "tmdb_credits" in metadata:
         store_tmdb_movie_credits(item, metadata["tmdb_credits"])
+
+
+def _persist_tmdb_content_ratings_for_item(item, metadata):
+    """Persist complete TMDB movie or TV rating data when supplied."""
+    if item.source != Sources.TMDB.value:
+        return
+    key = {
+        MediaTypes.MOVIE.value: "tmdb_movie_ratings",
+        MediaTypes.TV.value: "tmdb_tv_ratings",
+    }.get(item.media_type)
+    if key and key in metadata:
+        store_tmdb_content_ratings(item, metadata[key])
+
+
+def get_tmdb_rating_for_details(source, media_type, media_id, region):
+    """Return persisted TMDB ratings for a shared movie or TV Item."""
+    if source != Sources.TMDB.value or media_type not in {
+        MediaTypes.MOVIE.value,
+        MediaTypes.TV.value,
+    }:
+        return None
+    item = (
+        Item.objects.filter(media_id=media_id, source=source, media_type=media_type)
+        .select_related("tmdb_content_rating_metadata")
+        .first()
+    )
+    return get_tmdb_content_rating_display(item, region)
+
+
+def get_metadata_sync_cache_key(source, media_type, media_id, season_number):
+    """Return the active cache key for a metadata sync request."""
+    version = (
+        "_v2"
+        if source == Sources.TMDB.value
+        and media_type in {MediaTypes.MOVIE.value, MediaTypes.TV.value}
+        else ""
+    )
+    cache_key = f"{source}_{media_type}{version}_{media_id}"
+    if media_type == MediaTypes.SEASON.value:
+        cache_key += f"_{season_number}"
+    return cache_key
 
 
 IGDB_TAXONOMY_KIND_BY_PARAMETER = {
@@ -338,12 +381,16 @@ def _prepare_movie_credits(user, credits, birthday):
 
 def _prepare_tv_credits(user, credits, birthday):
     """Add viewer tracking, card data, and age-at-first-air to TV credits."""
-    tracked = TV.objects.filter(
-        user=user,
-        item__source=Sources.TMDB.value,
-        item__media_type=MediaTypes.TV.value,
-        item__media_id__in=[str(credit["media_id"]) for credit in credits],
-    ).select_related("item").prefetch_related("seasons")
+    tracked = (
+        TV.objects.filter(
+            user=user,
+            item__source=Sources.TMDB.value,
+            item__media_type=MediaTypes.TV.value,
+            item__media_id__in=[str(credit["media_id"]) for credit in credits],
+        )
+        .select_related("item")
+        .prefetch_related("seasons")
+    )
     tracked_by_id = {media.item.media_id: media for media in tracked}
     for credit in credits:
         age = calculate_age_on_date(birthday, credit.get("first_air_date"))
@@ -364,7 +411,9 @@ def _prepare_tv_credits(user, credits, birthday):
 def _sort_person_credits(credits, sort):
     """Sort mixed credits using their type-specific primary date and title."""
     by_title = lambda credit: credit["title"].casefold()
-    by_date = lambda credit: credit.get("release_date") or credit.get("first_air_date") or ""
+    by_date = lambda credit: (
+        credit.get("release_date") or credit.get("first_air_date") or ""
+    )
     credits.sort(key=by_title)
     if sort in {"title_asc", "title_desc"}:
         credits.sort(key=by_title, reverse=sort == "title_desc")
@@ -454,12 +503,16 @@ def discover_tv_by_person(request):
     credits = []
     if person_id.isdecimal() and int(person_id) > 0:
         credits = tmdb.person_tv_credits(person_id, role, sort)
-        tracked_shows = TV.objects.filter(
-            user=request.user,
-            item__source=Sources.TMDB.value,
-            item__media_type=MediaTypes.TV.value,
-            item__media_id__in=[str(credit["media_id"]) for credit in credits],
-        ).select_related("item").prefetch_related("seasons")
+        tracked_shows = (
+            TV.objects.filter(
+                user=request.user,
+                item__source=Sources.TMDB.value,
+                item__media_type=MediaTypes.TV.value,
+                item__media_id__in=[str(credit["media_id"]) for credit in credits],
+            )
+            .select_related("item")
+            .prefetch_related("seasons")
+        )
         tracked_by_id = {media.item.media_id: media for media in tracked_shows}
         for credit in credits:
             credit["media"] = tracked_by_id.get(str(credit["media_id"]))
@@ -509,6 +562,7 @@ def tmdb_person_age(request, person_id):
     birthday = tmdb.person_birthday(person_id)
     age = calculate_age_on_date(birthday, release_date)
     return render(request, "app/components/person_age.html", {"age": age})
+
 
 def get_provider_taxonomy_filters(query_params, kind_by_parameter):
     """Parse repeated included/excluded taxonomy IDs for one provider."""
@@ -958,6 +1012,12 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
     else:
         watch_providers = None
 
+    tmdb_content_rating = get_tmdb_rating_for_details(
+        source,
+        media_type,
+        media_id,
+        getattr(request.user, "tmdb_content_rating_region", "UNSET"),
+    )
     steam_rating = None
     steam_rating_art = None
     steam_rating_icon = None
@@ -1007,6 +1067,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         "current_instance": current_instance,
         "watch_providers": watch_providers,
         "watch_provider_region": request.user.watch_provider_region,
+        "tmdb_content_rating": tmdb_content_rating,
         "steam_rating": steam_rating,
         "steam_rating_agency": getattr(
             request.user,
@@ -1138,9 +1199,7 @@ def sync_metadata(request, source, media_type, media_id, season_number=None):
             headers={"HX-Redirect": request.POST.get("next", "/")},
         )
 
-    cache_key = f"{source}_{media_type}_{media_id}"
-    if media_type == MediaTypes.SEASON.value:
-        cache_key += f"_{season_number}"
+    cache_key = get_metadata_sync_cache_key(source, media_type, media_id, season_number)
 
     ttl = cache.ttl(cache_key)
     logger.debug("%s - Cache TTL for: %s", cache_key, ttl)
@@ -1171,6 +1230,7 @@ def sync_metadata(request, source, media_type, media_id, season_number=None):
         )
         _persist_igdb_taxonomies_for_item(item, metadata)
         _persist_tmdb_taxonomies_for_item(item, metadata)
+        _persist_tmdb_content_ratings_for_item(item, metadata)
         if source == Sources.IGDB.value and media_type == MediaTypes.GAME.value:
             refresh_steam_app_items([item], force=True)
         title = metadata["title"]
@@ -1338,6 +1398,7 @@ def media_save(request):
         )
         _persist_igdb_taxonomies_for_item(item, metadata)
         _persist_tmdb_taxonomies_for_item(item, metadata)
+        _persist_tmdb_content_ratings_for_item(item, metadata)
         model = apps.get_model(app_label="app", model_name=media_type)
         instance = model(item=item, user=request.user)
 

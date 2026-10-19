@@ -334,6 +334,28 @@
         </div>
       </div>
 
+      {# TMDB Content Rating Region #}
+      <div class="mb-5">
+        <div class="flex items-center justify-between p-3 bg-[#39404b] rounded-md">
+          <div class="flex-1">
+            <div class="flex items-center text-gray-200 mb-1">
+              {% include "app/icons/globe.svg" with classes="w-5 h-5 mr-2" %}
+              <span class="text-sm font-medium">TMDB content-rating region</span>
+            </div>
+            <p class="text-xs text-gray-400 ml-7">
+              Show movie certifications and TV content ratings for this region. Disabled hides these labels.
+            </p>
+          </div>
+          <select name="tmdb_content_rating_region"
+                  class="ml-4 max-w-48 p-2 bg-[#39404b] rounded-md text-white text-sm border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+            {% for choice in tmdb_content_rating_region_choices %}
+              <option value="{{ choice.0 }}"
+                      {% if user.tmdb_content_rating_region == choice.0 %}selected{% endif %}>{{ choice.1 }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
       {# Steam Rating System #}
       <div class="mb-5">
         <div class="flex items-center justify-between p-3 bg-[#39404b] rounded-md">

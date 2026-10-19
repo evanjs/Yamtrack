@@ -8,23 +8,29 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from app.metadata import (
-    mark_tmdb_movie_taxonomy_attempt,
     mark_steam_app_mapping_attempt,
     mark_steam_app_rating_attempt,
+    mark_tmdb_content_rating_attempt,
+    mark_tmdb_movie_taxonomy_attempt,
     store_igdb_game_taxonomies,
     store_steam_app_mapping,
     store_steam_app_ratings,
+    store_tmdb_content_ratings,
     store_tmdb_movie_credits,
     store_tmdb_movie_taxonomies,
 )
 from app.models import (
+    STEAM_METADATA_REFRESH_AFTER,
+    STEAM_METADATA_RETRY_AFTER,
+    TMDB_CONTENT_RATING_EVICT_AFTER,
+    TMDB_CONTENT_RATING_REFRESH_AFTER,
+    TMDB_CONTENT_RATING_RETRY_AFTER,
     Item,
     MediaTypes,
     Sources,
-    STEAM_METADATA_REFRESH_AFTER,
-    STEAM_METADATA_RETRY_AFTER,
     SteamAppMapping,
     SteamAppRating,
+    TMDBContentRatingMetadata,
     TMDBMovieCredit,
     TMDBMovieMetadata,
     TMDBMovieTaxonomy,
@@ -124,16 +130,20 @@ def get_due_steam_app_items(after_item_id=0, batch_size=100, *, fair_order=False
             ),
         )
     )
-    ratings_due = Q(steam_app_mapping__synced_at__gte=refresh_cutoff) & (
-        Q(steam_app_mapping__ratings_synced_at__isnull=True)
-        | Q(steam_app_mapping__ratings_synced_at__lt=refresh_cutoff)
-    ) & (
-        Q(steam_app_mapping__ratings_last_attempted_at__isnull=True)
-        | Q(steam_app_mapping__ratings_last_attempted_at__lt=retry_cutoff)
-        | Q(
-            steam_app_mapping__ratings_synced_at__gte=F(
-                "steam_app_mapping__ratings_last_attempted_at",
-            ),
+    ratings_due = (
+        Q(steam_app_mapping__synced_at__gte=refresh_cutoff)
+        & (
+            Q(steam_app_mapping__ratings_synced_at__isnull=True)
+            | Q(steam_app_mapping__ratings_synced_at__lt=refresh_cutoff)
+        )
+        & (
+            Q(steam_app_mapping__ratings_last_attempted_at__isnull=True)
+            | Q(steam_app_mapping__ratings_last_attempted_at__lt=retry_cutoff)
+            | Q(
+                steam_app_mapping__ratings_synced_at__gte=F(
+                    "steam_app_mapping__ratings_last_attempted_at",
+                ),
+            )
         )
     )
     items = Item.objects.filter(
@@ -377,3 +387,109 @@ def cleanup_expired_tmdb_movie_taxonomies():
     }
     logger.info("TMDB taxonomy cleanup completed: %s", result)
     return result
+
+
+def get_due_tmdb_content_rating_items(
+    after_item_id=0, batch_size=100, *, fair_order=False
+):
+    """Return a bounded batch of tracked TMDB movies or TV needing ratings."""
+    now = timezone.now()
+    refresh_cutoff = now - TMDB_CONTENT_RATING_REFRESH_AFTER
+    retry_cutoff = now - TMDB_CONTENT_RATING_RETRY_AFTER
+    due = (
+        Q(tmdb_content_rating_metadata__isnull=True)
+        | Q(tmdb_content_rating_metadata__synced_at__isnull=True)
+        | Q(tmdb_content_rating_metadata__synced_at__lt=refresh_cutoff)
+    )
+    retry_allowed = (
+        Q(tmdb_content_rating_metadata__last_attempted_at__isnull=True)
+        | Q(tmdb_content_rating_metadata__last_attempted_at__lt=retry_cutoff)
+        | Q(
+            tmdb_content_rating_metadata__synced_at__gte=F(
+                "tmdb_content_rating_metadata__last_attempted_at",
+            ),
+        )
+    )
+    items = (
+        Item.objects.filter(
+            source=Sources.TMDB.value,
+            media_type__in=[MediaTypes.MOVIE.value, MediaTypes.TV.value],
+            id__gt=after_item_id,
+        )
+        .filter(due, retry_allowed)
+        .filter(Q(movie__isnull=False) | Q(tv__isnull=False))
+    )
+    if fair_order:
+        items = items.order_by(
+            F("tmdb_content_rating_metadata__last_attempted_at").asc(nulls_first=True),
+            F("tmdb_content_rating_metadata__synced_at").asc(nulls_first=True),
+            "id",
+        )
+    else:
+        items = items.order_by("id")
+    return list(items.distinct()[:batch_size])
+
+
+def refresh_tmdb_content_rating_items(items):
+    """Fetch and persist one bounded batch of movie and TV ratings."""
+    succeeded = 0
+    failed_ids = []
+    for item in items:
+        try:
+            mark_tmdb_content_rating_attempt(item)
+            ratings = tmdb.content_ratings(item.media_type, item.media_id)
+            store_tmdb_content_ratings(item, ratings)
+        except (
+            services.ProviderAPIError,
+            requests.exceptions.RequestException,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            mark_tmdb_content_rating_attempt(item)
+            logger.exception("Failed to refresh TMDB ratings for Item %s", item.pk)
+            failed_ids.append(item.pk)
+        else:
+            succeeded += 1
+    return {"processed": len(items), "succeeded": succeeded, "failed_ids": failed_ids}
+
+
+@shared_task(name="Backfill TMDB content ratings")
+def backfill_tmdb_content_ratings(batch_size=100, after_item_id=0):
+    """Backfill TMDB ratings in resumable ID-ordered batches."""
+    if batch_size <= 0:
+        msg = "batch_size must be greater than zero"
+        raise ValueError(msg)
+    items = get_due_tmdb_content_rating_items(after_item_id, batch_size)
+    result = refresh_tmdb_content_rating_items(items)
+    next_after_item_id = items[-1].pk if items else after_item_id
+    result["next_after_item_id"] = next_after_item_id
+    result["has_more"] = bool(get_due_tmdb_content_rating_items(next_after_item_id, 1))
+    return result
+
+
+@shared_task(name="Refresh due TMDB content ratings")
+def refresh_due_tmdb_content_ratings(batch_size=100):
+    """Refresh a fair bounded batch of due TMDB ratings."""
+    if batch_size <= 0:
+        msg = "batch_size must be greater than zero"
+        raise ValueError(msg)
+    items = get_due_tmdb_content_rating_items(batch_size=batch_size, fair_order=True)
+    result = refresh_tmdb_content_rating_items(items)
+    result["has_more"] = bool(
+        get_due_tmdb_content_rating_items(batch_size=1, fair_order=True),
+    )
+    return result
+
+
+@shared_task(name="Cleanup expired TMDB content ratings")
+def cleanup_expired_tmdb_content_ratings():
+    """Delete durable TMDB rating rows past the conservative retention limit."""
+    cutoff = timezone.now() - TMDB_CONTENT_RATING_EVICT_AFTER
+    expired = TMDBContentRatingMetadata.objects.filter(
+        Q(synced_at__lt=cutoff)
+        | Q(synced_at__isnull=True, last_attempted_at__lt=cutoff),
+    )
+    deleted = expired.count()
+    expired.delete()
+    return {"metadata_deleted": deleted}

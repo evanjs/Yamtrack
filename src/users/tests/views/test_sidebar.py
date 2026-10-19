@@ -41,6 +41,8 @@ class SidebarViewTests(TestCase):
         )
         self.assertContains(response, "Steam rating system")
         self.assertContains(response, 'name="steam_rating_agency"')
+        self.assertContains(response, "TMDB content-rating region")
+        self.assertContains(response, 'name="tmdb_content_rating_region"')
         self.assertNotContains(response, "img/tmdb-logo.svg")
         self.assertNotContains(
             response,
@@ -105,6 +107,34 @@ class SidebarViewTests(TestCase):
         self.assertRedirects(response, reverse("preferences"))
         self.user.refresh_from_db()
         self.assertEqual(self.user.steam_rating_agency, "UNSET")
+
+    def test_tmdb_rating_region_is_independent_from_watch_provider_region(self):
+        """TMDB rating preference saves a region without coupling streaming."""
+        self.client.post(
+            reverse("preferences"),
+            {
+                "tmdb_content_rating_region": "US",
+                "watch_provider_region": "UNSET",
+                "media_types_checkboxes": [MediaTypes.MOVIE.value],
+            },
+        )
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.tmdb_content_rating_region, "US")
+        self.assertEqual(self.user.watch_provider_region, "UNSET")
+
+    def test_invalid_tmdb_rating_region_disables_the_badge(self):
+        """Unknown TMDB region preference values fail closed to unset."""
+        self.client.post(
+            reverse("preferences"),
+            {
+                "tmdb_content_rating_region": "INVALID",
+                "media_types_checkboxes": [MediaTypes.MOVIE.value],
+            },
+        )
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.tmdb_content_rating_region, "UNSET")
 
     def test_sidebar_post_update_preferences(self):
         """Test POST request to update preferences."""

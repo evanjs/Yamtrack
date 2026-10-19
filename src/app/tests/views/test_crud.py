@@ -548,6 +548,15 @@ class SyncIGDBMetadata(TestCase):
                 "genres": [],
                 "keywords": [{"id": 1852, "name": "haunting"}],
             },
+            "tmdb_movie_ratings": {
+                "US": [
+                    {
+                        "certification": "R",
+                        "type": 3,
+                        "release_date": "2024-01-01",
+                    },
+                ],
+            },
         }
 
         self.client.post(
@@ -570,4 +579,8 @@ class SyncIGDBMetadata(TestCase):
                 ),
             ),
             ["haunting"],
+        )
+        self.assertEqual(
+            movie_item.tmdb_content_rating_metadata.ratings["US"][0]["certification"],
+            "R",
         )
