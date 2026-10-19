@@ -273,6 +273,7 @@ def game(media_id):
         not isinstance(data, dict)
         or "igdb_taxonomies" not in data
         or "age_ratings" not in data
+        or "steam_app_id" not in data
     ):
         cache.delete(cache_key)
         data = None
@@ -371,6 +372,7 @@ def game(media_id):
             "igdb_taxonomies": get_igdb_taxonomies(game_response),
             "igdb_updated_at": get_igdb_updated_at(game_response),
             "age_ratings": get_age_ratings(game_response),
+            "steam_app_id": steam_app_id,
             "score": get_score(game_response),
             "score_count": game_response.get("total_rating_count"),
             "details": {

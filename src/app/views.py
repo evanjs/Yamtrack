@@ -48,7 +48,7 @@ from app.models import (
     UserMessage,
     tmdb_metadata_expiry_cutoff,
 )
-from app.providers import manual, services, tmdb
+from app.providers import manual, protondb, services, tmdb
 from app.tasks import refresh_steam_app_items
 from app.templatetags import app_tags
 from events.models import Event
@@ -62,6 +62,14 @@ from users.models import (
 
 logger = logging.getLogger(__name__)
 TMDB_CREDIT_SEARCH_MIN_LENGTH = 2
+
+
+def get_protondb_summary(source, media_type, metadata):
+    """Return ProtonDB status only for IGDB games with a mapped Steam app ID."""
+    if source != Sources.IGDB.value or media_type != MediaTypes.GAME.value:
+        return None
+    steam_app_id = metadata.get("steam_app_id")
+    return protondb.summary(steam_app_id) if steam_app_id else None
 
 
 def _persist_igdb_taxonomies_for_item(item, metadata):
@@ -953,6 +961,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
     steam_rating = None
     steam_rating_art = None
     steam_rating_icon = None
+    protondb_summary = get_protondb_summary(source, media_type, media_metadata)
     if source == Sources.IGDB.value and media_type == MediaTypes.GAME.value:
         steam_item = (
             Item.objects.filter(
@@ -1006,6 +1015,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         ),
         "steam_rating_art": steam_rating_art,
         "steam_rating_icon": steam_rating_icon,
+        "protondb_summary": protondb_summary,
     }
     return render(request, "app/media_details.html", context)
 
