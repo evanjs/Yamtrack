@@ -39,6 +39,8 @@ class SidebarViewTests(TestCase):
             response,
             "When excluding tags, include items with unknown tags?",
         )
+        self.assertContains(response, "Steam rating system")
+        self.assertContains(response, 'name="steam_rating_agency"')
         self.assertNotContains(response, "img/tmdb-logo.svg")
         self.assertNotContains(
             response,
@@ -74,6 +76,35 @@ class SidebarViewTests(TestCase):
         self.assertRedirects(response, reverse("preferences"))
         self.user.refresh_from_db()
         self.assertTrue(self.user.include_unknown_taxonomy)
+
+    def test_steam_rating_agency_preference_is_independent_and_optional(self):
+        """The user can select one Steam system without setting a country."""
+        self.assertEqual(self.user.steam_rating_agency, "UNSET")
+        response = self.client.post(
+            reverse("preferences"),
+            {
+                "steam_rating_agency": "esrb",
+                "media_types_checkboxes": [MediaTypes.GAME.value],
+            },
+        )
+
+        self.assertRedirects(response, reverse("preferences"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.steam_rating_agency, "esrb")
+
+    def test_invalid_steam_rating_agency_disables_the_badge(self):
+        """Unknown preference values fail closed to the unset option."""
+        response = self.client.post(
+            reverse("preferences"),
+            {
+                "steam_rating_agency": "unknown_provider_key",
+                "media_types_checkboxes": [MediaTypes.GAME.value],
+            },
+        )
+
+        self.assertRedirects(response, reverse("preferences"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.steam_rating_agency, "UNSET")
 
     def test_sidebar_post_update_preferences(self):
         """Test POST request to update preferences."""

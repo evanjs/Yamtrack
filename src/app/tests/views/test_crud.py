@@ -472,6 +472,7 @@ class SyncIGDBMetadata(TestCase):
             },
         )
 
+    @patch("app.views.refresh_steam_app_items")
     @patch("app.models.Item.fetch_releases")
     @patch("app.views.cache.delete")
     @patch("app.views.cache.ttl", return_value=0)
@@ -482,6 +483,7 @@ class SyncIGDBMetadata(TestCase):
         _mock_cache_ttl,
         _mock_cache_delete,
         _mock_fetch_releases,
+        mock_steam_ratings,
     ):
         """Explicit IGDB refresh replaces old facets after provider success."""
         mock_get_metadata.return_value = {
@@ -514,6 +516,7 @@ class SyncIGDBMetadata(TestCase):
         )
         self.item.refresh_from_db()
         self.assertEqual(self.item.title, "Example Game Updated")
+        mock_steam_ratings.assert_called_once_with([self.item], force=True)
 
     @patch("app.models.Item.fetch_releases")
     @patch("app.views.cache.delete")

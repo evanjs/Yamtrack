@@ -661,6 +661,7 @@ class Metadata(TestCase):
             igdb.get_steam_store_links(response),
             {
                 "Steam": "https://store.steampowered.com/app/292030/",
+                "ProtonDB": "https://www.protondb.com/app/292030",
                 "PCGamingWiki": (
                     "https://www.pcgamingwiki.com/api/appid.php?appid=292030"
                 ),
@@ -704,6 +705,17 @@ class Metadata(TestCase):
                         "genres": [{"id": 4, "name": "Fighting"}],
                         "themes": [{"id": 17, "name": "Fantasy"}],
                         "keywords": [{"id": 99, "name": "co-op"}],
+                        "age_ratings": [
+                            {
+                                "organization": {"id": 1, "name": "ESRB"},
+                                "rating_category": {"id": 11, "rating": "M"},
+                                "rating_cover_url": "https://images.example/esrb-m.png",
+                                "rating_content_descriptions": [
+                                    {"description": "Blood and Gore"},
+                                ],
+                                "synopsis": "Mature content.",
+                            },
+                        ],
                         "external_games": [],
                     },
                 ],
@@ -724,12 +736,28 @@ class Metadata(TestCase):
         self.assertEqual(metadata["genres"], ["Fighting"])
         self.assertEqual(metadata["details"]["themes"], ["Fantasy"])
         self.assertIsNotNone(metadata["igdb_updated_at"])
+        self.assertEqual(
+            metadata["age_ratings"],
+            [
+                {
+                    "organization": "ESRB",
+                    "rating": "M",
+                    "rating_cover_url": "https://images.example/esrb-m.png",
+                    "content_descriptions": ["Blood and Gore"],
+                    "synopsis": "Mature content.",
+                },
+            ],
+        )
 
         query = mock_api_request.call_args.kwargs["data"]
         self.assertIn("genres.id,genres.name", query)
         self.assertIn("themes.id,themes.name", query)
         self.assertIn("keywords.id,keywords.name", query)
         self.assertIn("updated_at", query)
+        self.assertIn("age_ratings.rating_cover_url", query)
+        self.assertIn("age_ratings.organization.name", query)
+        self.assertIn("age_ratings.rating_category.rating", query)
+        self.assertIn("age_ratings.rating_content_descriptions.description", query)
 
     @patch("app.providers.igdb.cache.set")
     @patch("app.providers.igdb.cache.get", return_value=None)
@@ -768,10 +796,16 @@ class Metadata(TestCase):
 
     @patch("app.providers.igdb.cache.delete")
     @patch("app.providers.igdb.cache.set")
-    @patch("app.providers.igdb.cache.get", return_value={"title": "Old cache"})
+    @patch(
+        "app.providers.igdb.cache.get",
+        return_value={
+            "title": "Old cache",
+            "igdb_taxonomies": {"genres": [], "themes": [], "keywords": []},
+        },
+    )
     @patch("app.providers.igdb.services.api_request")
     @patch("app.providers.igdb.get_access_token", return_value="test-token")
-    def test_game_refetches_old_cache_values_without_taxonomies(
+    def test_game_refetches_old_cache_values_without_age_ratings(
         self,
         _mock_access_token,
         mock_api_request,
@@ -779,7 +813,7 @@ class Metadata(TestCase):
         _mock_cache_set,
         mock_cache_delete,
     ):
-        """A pre-facet cached payload is invalidated on first use after upgrade."""
+        """A cached payload without age ratings is refreshed after upgrade."""
         mock_api_request.return_value = [
             {
                 "name": "GameData",

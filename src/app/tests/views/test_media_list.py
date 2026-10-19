@@ -15,6 +15,8 @@ from app.models import (
     Season,
     Sources,
     Status,
+    SteamAppMapping,
+    SteamAppRating,
 )
 from app.templatetags import app_tags
 from users.forms import UserUpdateForm
@@ -160,6 +162,33 @@ class MediaListViewTests(TestCase):
             ],
             ["Adventure", "Fighting"],
         )
+
+    def test_game_card_shows_only_the_viewers_selected_steam_rating(self):
+        """A configured agency rating appears on a game card without API access."""
+        item = Item.objects.create(
+            media_id="777",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Rated Game",
+            image="https://example.com/game.jpg",
+        )
+        Game.objects.create(item=item, user=self.user, status=Status.PLANNING)
+        SteamAppMapping.objects.create(item=item, app_ids=["292030"])
+        SteamAppRating.objects.create(
+            item=item,
+            steam_app_id="292030",
+            ratings={"esrb": {"rating": "m"}, "pegi": {"rating": "18"}},
+        )
+        self.user.steam_rating_agency = "esrb"
+        self.user.save(update_fields=["steam_rating_agency"])
+
+        response = self.client.get(
+            reverse("medialist", args=[self.user.username, MediaTypes.GAME.value]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ESRB")
+        self.assertContains(response, "ESRB: M")
 
     def test_movie_list_filters_by_tmdb_genre_and_keyword(self):
         """Movie list reuses the facet control for TMDB taxonomy values."""

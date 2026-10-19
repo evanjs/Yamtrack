@@ -59,6 +59,10 @@ session.mount(
     LimiterAdapter(per_second=3),
 )
 session.mount(
+    "https://store.steampowered.com",
+    LimiterAdapter(per_minute=30),
+)
+session.mount(
     "https://api.tvmaze.com",
     LimiterAdapter(per_second=2),
 )

@@ -122,6 +122,16 @@
     {% if item.release_year %}
       <div class="text-xs text-gray-400 mt-1">{{ item.release_year }}</div>
     {% endif %}
+    {% if item.media_type == MediaTypes.GAME.value and request.user.is_authenticated and request.user.steam_rating_agency != "UNSET" %}
+      {% steam_rating_for_item item request.user.steam_rating_agency as steam_rating %}
+      {% if steam_rating %}
+        {% steam_rating_agency_label request.user.steam_rating_agency as steam_rating_label %}
+        <div class="mt-2">
+          <span class="inline-flex items-center rounded bg-gray-900/70 px-2 py-1 text-xs text-gray-200"
+                title="Steam content rating ({{ steam_rating_label }})">{{ steam_rating_label }}: {{ steam_rating }}</span>
+        </div>
+      {% endif %}
+    {% endif %}
   </div>
 
   {% if item.media_type == MediaTypes.EPISODE.value %}
