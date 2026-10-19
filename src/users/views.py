@@ -20,6 +20,7 @@ from users.models import (
     DateFormatChoices,
     DefaultEditEntryDateChoices,
     QuickWatchDateChoices,
+    SteamRatingAgencyChoices,
     TimeFormatChoices,
     WeekStartDayChoices,
 )
@@ -235,6 +236,7 @@ def preferences(request):
                 "time_format_choices": TimeFormatChoices.choices,
                 "week_start_day_choices": WeekStartDayChoices.choices,
                 "watch_provider_choices": watch_provider_regions,
+                "steam_rating_agency_choices": SteamRatingAgencyChoices.choices,
             },
         )
 
@@ -288,6 +290,12 @@ def preferences(request):
         request.user.watch_provider_region = provider_region
     else:
         request.user.watch_provider_region = WATCH_PROVIDER_REGION_UNSET
+
+    steam_rating_agency = request.POST.get("steam_rating_agency")
+    if steam_rating_agency in SteamRatingAgencyChoices.values:
+        request.user.steam_rating_agency = steam_rating_agency
+    else:
+        request.user.steam_rating_agency = SteamRatingAgencyChoices.UNSET
 
     # Update user preferences for each media type
     for media_type in media_types:

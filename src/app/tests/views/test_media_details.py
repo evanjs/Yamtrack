@@ -12,6 +12,8 @@ from app.models import (
     Movie,
     Sources,
     Status,
+    SteamAppMapping,
+    SteamAppRating,
 )
 
 
@@ -67,6 +69,177 @@ class MediaDetailsViewTests(TestCase):
             "238",
             Sources.TMDB.value,
         )
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_game_details_show_selected_persisted_steam_rating(self, mock_get_metadata):
+        """Game detail reads the selected rating from SQL without a provider call."""
+        item = Item.objects.create(
+            media_id="777",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Rated Game",
+            image="https://example.com/game.jpg",
+        )
+        SteamAppMapping.objects.create(item=item, app_ids=["292030"])
+        SteamAppRating.objects.create(
+            item=item,
+            steam_app_id="292030",
+            ratings={"esrb": {"rating": "m"}},
+        )
+        self.user.steam_rating_agency = "esrb"
+        self.user.save(update_fields=["steam_rating_agency"])
+        mock_get_metadata.return_value = {
+            "media_id": "777",
+            "title": "Rated Game",
+            "media_type": MediaTypes.GAME.value,
+            "source": Sources.IGDB.value,
+            "image": "https://example.com/game.jpg",
+            "genres": [],
+            "screenshots": [],
+            "age_ratings": [
+                {
+                    "organization": "ESRB",
+                    "rating": "M",
+                    "rating_cover_url": "https://images.example/esrb-m.png",
+                    "content_descriptions": ["Blood and Gore"],
+                    "synopsis": "Mature content.",
+                },
+            ],
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.IGDB.value,
+                    "media_type": MediaTypes.GAME.value,
+                    "media_id": "777",
+                    "title": "rated-game",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["steam_rating"], "M")
+        self.assertContains(response, "ESRB")
+        self.assertContains(response, "Age rating for: ESRB")
+        self.assertContains(response, 'src="https://images.example/esrb-m.png"')
+        self.assertContains(response, "Blood and Gore")
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_game_details_fall_back_to_text_without_matching_igdb_art(
+        self,
+        mock_get_metadata,
+    ):
+        """Keep the selected Steam rating visible when IGDB has no matching art."""
+        item = Item.objects.create(
+            media_id="778",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Unmatched Rating Game",
+            image="https://example.com/game.jpg",
+        )
+        SteamAppMapping.objects.create(item=item, app_ids=["570"])
+        SteamAppRating.objects.create(
+            item=item,
+            steam_app_id="570",
+            ratings={"esrb": {"rating": "m"}},
+        )
+        self.user.steam_rating_agency = "esrb"
+        self.user.save(update_fields=["steam_rating_agency"])
+        mock_get_metadata.return_value = {
+            "media_id": "778",
+            "title": "Unmatched Rating Game",
+            "media_type": MediaTypes.GAME.value,
+            "source": Sources.IGDB.value,
+            "image": "https://example.com/game.jpg",
+            "genres": [],
+            "screenshots": [],
+            "age_ratings": [],
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.IGDB.value,
+                    "media_type": MediaTypes.GAME.value,
+                    "media_id": "778",
+                    "title": "unmatched-rating-game",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context["steam_rating_art"])
+        self.assertContains(response, "ESRB")
+        self.assertContains(response, "M")
+        self.assertNotContains(response, "images.example")
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_game_details_use_local_icon_when_igdb_cover_url_is_empty(
+        self,
+        mock_get_metadata,
+    ):
+        """Use the locally bundled exact-match icon when IGDB's URL is null."""
+        item = Item.objects.create(
+            media_id="779",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Phantasmagoria",
+            image="https://example.com/game.jpg",
+        )
+        SteamAppMapping.objects.create(item=item, app_ids=["501990"])
+        SteamAppRating.objects.create(
+            item=item,
+            steam_app_id="501990",
+            ratings={
+                "esrb": {
+                    "rating": "m",
+                    "descriptors": "Blood and Gore\\r\\nStrong Sexual Content",
+                },
+            },
+        )
+        self.user.steam_rating_agency = "esrb"
+        self.user.save(update_fields=["steam_rating_agency"])
+        mock_get_metadata.return_value = {
+            "media_id": "779",
+            "title": "Phantasmagoria",
+            "media_type": MediaTypes.GAME.value,
+            "source": Sources.IGDB.value,
+            "image": "https://example.com/game.jpg",
+            "genres": [],
+            "screenshots": [],
+            "age_ratings": [
+                {
+                    "organization": "ESRB",
+                    "rating": "M",
+                    "rating_cover_url": None,
+                    "content_descriptions": ["Blood and Gore"],
+                    "synopsis": "",
+                },
+            ],
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.IGDB.value,
+                    "media_type": MediaTypes.GAME.value,
+                    "media_id": "779",
+                    "title": "phantasmagoria",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["steam_rating_icon"],
+            "img/ratings/esrb/mature.svg",
+        )
+        self.assertContains(response, "img/ratings/esrb/mature.svg")
+        self.assertContains(response, "Blood and Gore")
 
     @patch("app.providers.services.get_media_metadata")
     @patch("app.providers.tmdb.process_episodes")

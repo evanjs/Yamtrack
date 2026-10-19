@@ -10,7 +10,7 @@ from unidecode import unidecode
 
 from app import config, helpers
 from app.models import MediaTypes, Sources, Status
-from users.models import WATCH_PROVIDER_REGION_UNSET
+from users.models import WATCH_PROVIDER_REGION_UNSET, SteamRatingAgencyChoices
 
 register = template.Library()
 
@@ -480,6 +480,24 @@ def show_media_score(rating, user):
         True if we should show the media score
     """
     return rating is not None and (not user.hide_zero_rating or rating > 0)
+
+
+@register.simple_tag
+def steam_rating_for_item(item, agency):
+    """Return an unambiguous persisted rating for a selected Steam agency."""
+    from app.metadata import (  # noqa: PLC0415
+        format_steam_rating_value,
+        get_steam_rating_value,
+    )
+
+    rating = get_steam_rating_value(item, agency)
+    return format_steam_rating_value(agency, rating)
+
+
+@register.simple_tag
+def steam_rating_agency_label(agency):
+    """Return the visible label for a Steam rating system preference."""
+    return dict(SteamRatingAgencyChoices.choices).get(agency, "")
 
 
 @register.simple_tag

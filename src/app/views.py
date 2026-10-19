@@ -22,6 +22,10 @@ from app import home as home_helpers
 from app import statistics as stats
 from app.forms import EpisodeForm, ManualItemForm, get_form_class
 from app.metadata import (
+    format_steam_rating_value,
+    get_igdb_rating_for_steam,
+    get_local_steam_rating_icon_path,
+    get_steam_rating_value,
     mark_tmdb_movie_taxonomy_attempt,
     store_igdb_game_taxonomies,
     store_tmdb_movie_credits,
@@ -45,6 +49,7 @@ from app.models import (
     tmdb_metadata_expiry_cutoff,
 )
 from app.providers import manual, services, tmdb
+from app.tasks import refresh_steam_app_items
 from app.templatetags import app_tags
 from events.models import Event
 from users.models import (
@@ -945,6 +950,47 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
     else:
         watch_providers = None
 
+    steam_rating = None
+    steam_rating_art = None
+    steam_rating_icon = None
+    if source == Sources.IGDB.value and media_type == MediaTypes.GAME.value:
+        steam_item = (
+            Item.objects.filter(
+                media_id=media_id,
+                source=source,
+                media_type=media_type,
+            )
+            .select_related("steam_app_mapping")
+            .prefetch_related("steam_app_ratings")
+            .first()
+        )
+        if steam_item:
+            steam_rating_agency = getattr(
+                request.user,
+                "steam_rating_agency",
+                "UNSET",
+            )
+            raw_steam_rating = get_steam_rating_value(
+                steam_item,
+                steam_rating_agency,
+            )
+            steam_rating = format_steam_rating_value(
+                steam_rating_agency,
+                raw_steam_rating,
+            )
+            if raw_steam_rating:
+                steam_rating_art = get_igdb_rating_for_steam(
+                    steam_rating_agency,
+                    raw_steam_rating,
+                    media_metadata.get("age_ratings"),
+                )
+                if steam_rating_art and not steam_rating_art.get("rating_cover_url"):
+                    steam_rating_icon = get_local_steam_rating_icon_path(
+                        steam_rating_agency,
+                        raw_steam_rating,
+                        steam_rating_art,
+                    )
+
     context = {
         "media": media_metadata,
         "media_type": media_type,
@@ -952,6 +998,14 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         "current_instance": current_instance,
         "watch_providers": watch_providers,
         "watch_provider_region": request.user.watch_provider_region,
+        "steam_rating": steam_rating,
+        "steam_rating_agency": getattr(
+            request.user,
+            "steam_rating_agency",
+            "UNSET",
+        ),
+        "steam_rating_art": steam_rating_art,
+        "steam_rating_icon": steam_rating_icon,
     }
     return render(request, "app/media_details.html", context)
 
@@ -1107,6 +1161,8 @@ def sync_metadata(request, source, media_type, media_id, season_number=None):
         )
         _persist_igdb_taxonomies_for_item(item, metadata)
         _persist_tmdb_taxonomies_for_item(item, metadata)
+        if source == Sources.IGDB.value and media_type == MediaTypes.GAME.value:
+            refresh_steam_app_items([item], force=True)
         title = metadata["title"]
         if season_number:
             title += f" - Season {season_number}"

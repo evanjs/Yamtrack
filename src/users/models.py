@@ -18,6 +18,30 @@ VALID_SEARCH_TYPES = [
 WATCH_PROVIDER_REGION_UNSET = "UNSET"
 
 
+class SteamRatingAgencyChoices(models.TextChoices):
+    """Rating systems available as a viewer preference for Steam badges."""
+
+    UNSET = "UNSET", "Disabled"
+    ESRB = "esrb", "ESRB"
+    PEGI = "pegi", "PEGI"
+    USK = "usk", "USK"
+    STEAM_GERMANY = "steam_germany", "Steam Germany"
+    AGCOM = "agcom", "AGCOM"
+    CADPA = "cadpa", "CADPA"
+    CERO = "cero", "CERO"
+    CRL = "crl", "CRL"
+    CSRR = "csrr", "CSRR"
+    DEJUS = "dejus", "DEJUS"
+    FPB = "fpb", "FPB"
+    GMEDIA = "gmedia", "GMedia"
+    IGRS = "igrs", "IGRS"
+    KGRB = "kgrb", "KGRB"
+    MDA = "mda", "MDA"
+    NZOFLC = "nzoflc", "NZOFLC"
+    OFLC = "oflc", "OFLC"
+    STEAM_AUSTRALIA = "steam_australia", "Steam Australia"
+
+
 def generate_token():
     """Generate a user token."""
     return secrets.token_urlsafe(24)
@@ -395,6 +419,12 @@ class User(AbstractUser):
         max_length=5,
         default=WATCH_PROVIDER_REGION_UNSET,
         help_text="Region to show watch providers for",
+    )
+    steam_rating_agency = models.CharField(
+        max_length=20,
+        choices=SteamRatingAgencyChoices,
+        default=SteamRatingAgencyChoices.UNSET,
+        help_text="Rating system to show for Steam game content ratings",
     )
 
     # Calendar preferences

@@ -270,7 +270,9 @@ def game(media_id):
     cache_key = f"{Sources.IGDB.value}_{MediaTypes.GAME.value}_{media_id}"
     data = cache.get(cache_key)
     if data is not None and (
-        not isinstance(data, dict) or "igdb_taxonomies" not in data
+        not isinstance(data, dict)
+        or "igdb_taxonomies" not in data
+        or "age_ratings" not in data
     ):
         cache.delete(cache_key)
         data = None
@@ -282,6 +284,10 @@ def game(media_id):
             "fields name,cover.image_id,screenshots.image_id,"
             "url,summary,game_type,first_release_date,updated_at,"
             "total_rating,total_rating_count,"
+            "age_ratings.rating_cover_url,age_ratings.organization.name,"
+            "age_ratings.rating_category.rating,"
+            "age_ratings.rating_content_descriptions.description,"
+            "age_ratings.synopsis,"
             "genres.id,genres.name,themes.id,themes.name,keywords.id,keywords.name,"
             "platforms.name,involved_companies.company.name,"
             "parent_game.name,parent_game.cover.image_id,"
@@ -364,6 +370,7 @@ def game(media_id):
             "genres": get_list(game_response, "genres"),
             "igdb_taxonomies": get_igdb_taxonomies(game_response),
             "igdb_updated_at": get_igdb_updated_at(game_response),
+            "age_ratings": get_age_ratings(game_response),
             "score": get_score(game_response),
             "score_count": game_response.get("total_rating_count"),
             "details": {
@@ -452,6 +459,86 @@ def game_taxonomies(media_id):
 
     cache.set(cache_key, data)
     return data
+
+
+def _is_valid_steam_app_id(app_id):
+    """Return whether an external-game UID is a positive Steam App ID."""
+    return (
+        isinstance(app_id, str)
+        and app_id.isascii()
+        and app_id.isdecimal()
+        and int(app_id) > 0
+    )
+
+
+def _normalize_steam_app_ids(response, game_id):
+    """Extract unique Steam IDs from one IGDB game response."""
+    if not isinstance(response, list):
+        msg = f"IGDB returned an invalid mapping response for game {game_id}."
+        raise TypeError(msg)
+    if len(response) > 1:
+        msg = f"IGDB returned multiple game records for game {game_id}."
+        raise ValueError(msg)
+    external_games = response[0].get("external_games", []) if response else []
+    if not isinstance(external_games, list):
+        msg = f"IGDB returned invalid external-game data for game {game_id}."
+        raise TypeError(msg)
+    return list(
+        dict.fromkeys(
+            external_game["uid"]
+            for external_game in external_games
+            if isinstance(external_game, dict)
+            and external_game.get("external_game_source") == ExternalGameSource.STEAM
+            and _is_valid_steam_app_id(external_game.get("uid"))
+        ),
+    )
+
+
+def steam_app_ids(media_id, *, force=False):
+    """Return Steam IDs linked to an IGDB game, optionally bypassing cache."""
+    game_id = str(media_id)
+    if not game_id.isascii() or not game_id.isdecimal() or int(game_id) <= 0:
+        msg = f"Invalid IGDB game ID: {media_id!r}"
+        raise ValueError(msg)
+
+    cache_key = f"{Sources.IGDB.value}_steam_app_ids_{game_id}"
+    data = None if force else cache.get(cache_key)
+    if data is not None:
+        return data
+
+    url = f"{base_url}/games"
+    query = (
+        "fields external_games.uid,external_games.external_game_source;"
+        f"where id = {game_id};"
+    )
+    headers = {
+        "Client-ID": settings.IGDB_ID,
+        "Authorization": f"Bearer {get_access_token()}",
+    }
+    try:
+        response = services.api_request(
+            Sources.IGDB.value,
+            "POST",
+            url,
+            data=query,
+            headers=headers,
+        )
+    except requests.exceptions.HTTPError as error:
+        error_response = handle_error(error)
+        if not error_response or not error_response.get("retry"):
+            raise
+        headers["Authorization"] = f"Bearer {get_access_token()}"
+        response = services.api_request(
+            Sources.IGDB.value,
+            "POST",
+            url,
+            data=query,
+            headers=headers,
+        )
+
+    app_ids = _normalize_steam_app_ids(response, game_id)
+    cache.set(cache_key, app_ids)
+    return app_ids
 
 
 def get_steam_app_id(response):
@@ -581,6 +668,43 @@ def get_igdb_taxonomies(response):
         ]
         for taxonomy in ("genres", "themes", "keywords")
     }
+
+
+def get_age_ratings(response):
+    """Normalize IGDB's per-organization age ratings and image URLs."""
+    records = response.get("age_ratings")
+    if not isinstance(records, list):
+        return []
+
+    ratings = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        organization = record.get("organization")
+        if isinstance(organization, dict):
+            organization = organization.get("name")
+        category = record.get("rating_category")
+        if isinstance(category, dict):
+            category = category.get("rating")
+        content_descriptions = record.get("rating_content_descriptions")
+        if not isinstance(content_descriptions, list):
+            content_descriptions = []
+        ratings.append(
+            {
+                "organization": organization,
+                "rating": category,
+                "rating_cover_url": record.get("rating_cover_url"),
+                "content_descriptions": [
+                    description["description"]
+                    for description in content_descriptions
+                    if isinstance(description, dict)
+                    and isinstance(description.get("description"), str)
+                    and description["description"]
+                ],
+                "synopsis": record.get("synopsis") or "",
+            },
+        )
+    return ratings
 
 
 def get_igdb_updated_at(response):

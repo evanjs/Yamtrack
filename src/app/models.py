@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 TMDB_TAXONOMY_REFRESH_AFTER = timedelta(days=30)
 TMDB_TAXONOMY_EVICT_AFTER = timedelta(days=150)
 TMDB_TAXONOMY_RETRY_AFTER = timedelta(days=1)
+STEAM_METADATA_REFRESH_AFTER = timedelta(days=30)
+STEAM_METADATA_RETRY_AFTER = timedelta(days=1)
 
 
 def tmdb_metadata_expiry_cutoff(reference_time=None):
@@ -290,6 +292,58 @@ class IGDBGameMetadata(models.Model):
     def __str__(self):
         """Return the associated game Item's title."""
         return f"IGDB metadata for {self.item}"
+
+
+class SteamAppRating(models.Model):
+    """Persist regional Steam Store ratings for one verified App ID."""
+
+    item = models.ForeignKey(
+        Item,
+        on_delete=models.CASCADE,
+        related_name="steam_app_ratings",
+    )
+    steam_app_id = models.CharField(max_length=20, unique=True)
+    ratings = models.JSONField(default=dict)
+    synced_at = models.DateTimeField(null=True, blank=True)
+    last_attempted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        """Model options for Steam App rating metadata."""
+
+        indexes = [models.Index(fields=["synced_at", "last_attempted_at"])]
+
+    def __str__(self):
+        """Return the App ID and associated game title."""
+        return f"Steam ratings for {self.steam_app_id}: {self.item}"
+
+
+class SteamAppMapping(models.Model):
+    """Persist IGDB's Steam App ID mapping result for one tracked game Item."""
+
+    item = models.OneToOneField(
+        Item,
+        on_delete=models.CASCADE,
+        related_name="steam_app_mapping",
+    )
+    app_ids = models.JSONField(default=list)
+    synced_at = models.DateTimeField(null=True, blank=True)
+    last_attempted_at = models.DateTimeField(null=True, blank=True)
+    ratings_synced_at = models.DateTimeField(null=True, blank=True)
+    ratings_last_attempted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        """Model options for IGDB-to-Steam mapping metadata."""
+
+        indexes = [
+            models.Index(fields=["synced_at", "last_attempted_at"]),
+            models.Index(
+                fields=["ratings_synced_at", "ratings_last_attempted_at"],
+            ),
+        ]
+
+    def __str__(self):
+        """Return the mapped IGDB game title."""
+        return f"Steam mapping for {self.item}"
 
 
 class IGDBGameTaxonomyAssignment(models.Model):
@@ -650,6 +704,11 @@ class MediaManager(models.Manager):
                 to_attr="prefetched_events",
             ),
         )
+
+        if media_type == MediaTypes.GAME.value:
+            return base_queryset.select_related(
+                "item__steam_app_mapping",
+            ).prefetch_related("item__steam_app_ratings")
 
         if media_type == MediaTypes.SEASON.value:
             return base_queryset.prefetch_related(

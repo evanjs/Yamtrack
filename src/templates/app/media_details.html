@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load app_tags %}
+{% load static %}
 {% load humanize %}
 
 {% block title %}
@@ -268,6 +269,47 @@
 
       </div>
     </div>
+
+    {% if steam_rating %}
+      {% steam_rating_agency_label steam_rating_agency as steam_rating_label %}
+      <section class="mb-8 rounded-lg bg-[#2a2f35] p-4 md:p-5"
+               aria-label="Content rating">
+        <h2 class="text-xl font-bold mb-4">Ratings</h2>
+        <div class="flex items-start gap-4">
+          {% if steam_rating_art.rating_cover_url %}
+            <img src="{{ steam_rating_art.rating_cover_url }}"
+                 alt="{{ steam_rating_label }} {{ steam_rating }} age rating"
+                 class="w-20 max-h-28 shrink-0 object-contain"
+                 loading="lazy">
+          {% elif steam_rating_icon %}
+            <img src="{% static steam_rating_icon %}"
+                 alt="{{ steam_rating_label }} {{ steam_rating }} age rating"
+                 class="w-20 max-h-28 shrink-0 object-contain"
+                 loading="lazy">
+          {% else %}
+            <div class="flex h-20 w-20 shrink-0 items-center justify-center rounded bg-[#39404b] text-center text-lg font-bold text-white"
+                 aria-label="{{ steam_rating_label }} {{ steam_rating }} age rating">
+              {{ steam_rating_label }}
+              <br>
+              {{ steam_rating }}
+            </div>
+          {% endif %}
+          <div class="min-w-0 text-sm text-gray-200">
+            <p class="font-semibold">{{ steam_rating_label }} {{ steam_rating }}</p>
+            {% if steam_rating_art.content_descriptions %}
+              <ul class="mt-1 space-y-1 text-gray-300">
+                {% for description in steam_rating_art.content_descriptions %}
+                  <li>{{ description }}</li>
+                {% endfor %}
+              </ul>
+            {% elif steam_rating_art.synopsis %}
+              <p class="mt-1 text-gray-300">{{ steam_rating_art.synopsis }}</p>
+            {% endif %}
+          </div>
+        </div>
+        <p class="mt-3 text-xs text-gray-400">Age rating for: {{ steam_rating_label }}</p>
+      </section>
+    {% endif %}
 
     {% if media.screenshots %}
       <section class="mb-12" aria-label="Gameplay screenshots">
