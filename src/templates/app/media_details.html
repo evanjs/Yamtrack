@@ -270,6 +270,40 @@
       </div>
     </div>
 
+    {% if protondb_summary %}
+      <section class="mb-6 rounded-lg bg-[#2a2f35] p-4 md:p-5"
+               aria-label="Compatibility">
+        <h2 class="text-xl font-bold mb-3">Compatibility</h2>
+        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">ProtonDB</p>
+        <a href="https://www.protondb.com/app/{{ media.steam_app_id }}"
+           aria-label="ProtonDB compatibility: {{ protondb_summary.tier }}{% if protondb_summary.trending_tier %}; trending tier {{ protondb_summary.trending_tier }}{% endif %}"
+           class="relative inline-flex items-center justify-center px-4 text-sm font-medium tracking-wide shadow-sm transition-opacity"
+           style="background-color: {{ protondb_summary.banner_color }};
+                  color: #171717;
+                  width: 224px;
+                  height: 43px"
+           target="_blank"
+           rel="noopener noreferrer">
+          <span class="uppercase">{{ protondb_summary.tier }}</span>
+          {% if protondb_summary.trending_tier %}
+            <span class="absolute"
+                  style="right: 16px"
+                  title="Trending tier: {{ protondb_summary.trending_tier }}">
+              {% include "app/icons/trending-up.svg" with classes="h-5 w-5" %}
+            </span>
+          {% endif %}
+        </a>
+        {% if protondb_summary.confidence or protondb_summary.total is not None %}
+          <p class="mt-2 text-xs text-gray-400">
+            {% if protondb_summary.confidence %}{{ protondb_summary.confidence }} confidence{% endif %}
+            {% if protondb_summary.confidence and protondb_summary.total is not None %}·{% endif %}
+            {% if protondb_summary.total is not None %}{{ protondb_summary.total|intcomma }} reports{% endif %}
+          </p>
+        {% endif %}
+        <p class="mt-2 text-xs text-gray-500">Community-reported compatibility from ProtonDB.</p>
+      </section>
+    {% endif %}
+
     {% if steam_rating %}
       {% steam_rating_agency_label steam_rating_agency as steam_rating_label %}
       <section class="mb-8 rounded-lg bg-[#2a2f35] p-4 md:p-5"

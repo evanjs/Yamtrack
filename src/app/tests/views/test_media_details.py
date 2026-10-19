@@ -70,6 +70,64 @@ class MediaDetailsViewTests(TestCase):
             Sources.TMDB.value,
         )
 
+    @patch(
+        "app.providers.protondb.summary",
+        return_value={
+            "tier": "Gold",
+            "banner_color": "#c8b33f",
+            "trending_tier": "Gold",
+        },
+    )
+    @patch("app.providers.services.get_media_metadata")
+    def test_game_details_show_attributed_protondb_summary(
+        self,
+        mock_get_metadata,
+        mock_protondb_summary,
+    ):
+        """Show the cached, source-attributed summary on mapped game details."""
+        mock_get_metadata.return_value = {
+            "media_id": "777",
+            "title": "Rated Game",
+            "media_type": MediaTypes.GAME.value,
+            "source": Sources.IGDB.value,
+            "image": "https://example.com/game.jpg",
+            "genres": [],
+            "screenshots": [],
+            "external_links": {
+                "ProtonDB": "https://www.protondb.com/app/292030",
+            },
+            "steam_app_id": "292030",
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.IGDB.value,
+                    "media_type": MediaTypes.GAME.value,
+                    "media_id": "777",
+                    "title": "rated-game",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["protondb_summary"],
+            {
+                "tier": "Gold",
+                "banner_color": "#c8b33f",
+                "trending_tier": "Gold",
+            },
+        )
+        self.assertContains(response, "ProtonDB compatibility")
+        self.assertContains(response, ">Compatibility</h2>")
+        self.assertContains(response, ">ProtonDB</p>")
+        self.assertContains(response, 'class="uppercase">Gold</span>')
+        self.assertContains(response, "Trending tier: Gold")
+        self.assertContains(response, 'href="https://www.protondb.com/app/292030"')
+        mock_protondb_summary.assert_called_once_with("292030")
+
     @patch("app.providers.services.get_media_metadata")
     def test_game_details_show_selected_persisted_steam_rating(self, mock_get_metadata):
         """Game detail reads the selected rating from SQL without a provider call."""
