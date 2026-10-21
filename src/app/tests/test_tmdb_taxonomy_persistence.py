@@ -1,10 +1,11 @@
 from django.test import TestCase
 
-from app.metadata import store_tmdb_movie_taxonomies
+from app.metadata import store_tmdb_content_ratings, store_tmdb_movie_taxonomies
 from app.models import (
     Item,
     MediaTypes,
     Sources,
+    TMDBContentRatingMetadata,
     TMDBMovieMetadata,
     TMDBMovieTaxonomy,
 )
@@ -104,3 +105,21 @@ class TMDBMovieTaxonomyPersistenceTests(TestCase):
 
         with self.assertRaises(ValueError):
             store_tmdb_movie_taxonomies(game_item, {"genres": [], "keywords": []})
+
+    def test_stores_movie_release_variants_and_successful_empty(self):
+        """Rating storage retains every release variant and empty success."""
+        entries = {
+            "US": [
+                {"certification": "R", "type": 3, "release_date": "2024-01-01"},
+                {"certification": "PG-13", "type": 4, "release_date": "2024-02-01"},
+            ],
+        }
+
+        metadata = store_tmdb_content_ratings(self.item, entries)
+
+        self.assertEqual(metadata.ratings, entries)
+        self.assertIsNotNone(metadata.synced_at)
+        self.assertEqual(TMDBContentRatingMetadata.objects.count(), 1)
+        metadata = store_tmdb_content_ratings(self.item, {})
+        self.assertEqual(metadata.ratings, {})
+        self.assertIsNotNone(metadata.synced_at)

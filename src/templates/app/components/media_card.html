@@ -132,6 +132,17 @@
         </div>
       {% endif %}
     {% endif %}
+    {% if item.source == Sources.TMDB.value and item.media_type == MediaTypes.MOVIE.value or item.source == Sources.TMDB.value and item.media_type == MediaTypes.TV.value %}
+      {% if request.user.is_authenticated and request.user.tmdb_content_rating_region != "UNSET" %}
+        {% tmdb_content_rating_for_item item request.user.tmdb_content_rating_region as tmdb_rating %}
+        {% if tmdb_rating %}
+          <div class="mt-2">
+            <span class="inline-flex items-center rounded bg-gray-900/70 px-2 py-1 text-xs text-gray-200"
+                  title="TMDB content rating ({{ request.user.tmdb_content_rating_region }})">{{ request.user.tmdb_content_rating_region }} · {{ tmdb_rating }}</span>
+          </div>
+        {% endif %}
+      {% endif %}
+    {% endif %}
   </div>
 
   {% if item.media_type == MediaTypes.EPISODE.value %}

@@ -16,6 +16,7 @@ VALID_SEARCH_TYPES = [
 
 # Sentinel for an unconfigured watch provider region.
 WATCH_PROVIDER_REGION_UNSET = "UNSET"
+TMDB_CONTENT_RATING_REGION_UNSET = "UNSET"
 
 
 class SteamRatingAgencyChoices(models.TextChoices):
@@ -419,6 +420,11 @@ class User(AbstractUser):
         max_length=5,
         default=WATCH_PROVIDER_REGION_UNSET,
         help_text="Region to show watch providers for",
+    )
+    tmdb_content_rating_region = models.CharField(
+        max_length=5,
+        default=TMDB_CONTENT_RATING_REGION_UNSET,
+        help_text="Region to show TMDB content ratings for",
     )
     steam_rating_agency = models.CharField(
         max_length=20,

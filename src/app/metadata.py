@@ -4,6 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from app.models import (
+    TMDB_CONTENT_RATING_EVICT_AFTER,
     IGDBGameMetadata,
     IGDBGameTaxonomy,
     IGDBGameTaxonomyAssignment,
@@ -12,6 +13,7 @@ from app.models import (
     Sources,
     SteamAppMapping,
     SteamAppRating,
+    TMDBContentRatingMetadata,
     TMDBMovieCredit,
     TMDBMovieCreditAssignment,
     TMDBMovieMetadata,
@@ -127,8 +129,7 @@ def store_steam_app_ratings(item, steam_app_id, ratings):
         )
         if not created and metadata.item_id != item.pk:
             msg = (
-                f"Steam App ID {steam_app_id} is already associated with "
-                "another Item."
+                f"Steam App ID {steam_app_id} is already associated with another Item."
             )
             raise ValueError(msg)
         metadata.ratings = ratings
@@ -148,10 +149,7 @@ def mark_steam_app_rating_attempt(item, steam_app_id):
         defaults={"item": item},
     )
     if not created and metadata.item_id != item.pk:
-        msg = (
-            f"Steam App ID {steam_app_id} is already associated with "
-            "another Item."
-        )
+        msg = f"Steam App ID {steam_app_id} is already associated with another Item."
         raise ValueError(msg)
     metadata.last_attempted_at = timezone.now()
     metadata.save(update_fields=["last_attempted_at"])
@@ -304,8 +302,7 @@ def get_igdb_rating_for_steam(agency, steam_rating, age_ratings):
         for age_rating in age_ratings
         if isinstance(age_rating, dict)
         and _rating_token(age_rating.get("organization")) == organization
-        and _canonical_rating_value(agency, age_rating.get("rating"))
-        == expected_rating
+        and _canonical_rating_value(agency, age_rating.get("rating")) == expected_rating
     ]
     return matching[0] if len(matching) == 1 else None
 
@@ -371,6 +368,102 @@ TMDB_TAXONOMY_KINDS = {
     "genres": TMDBMovieTaxonomy.Kind.GENRE,
     "keywords": TMDBMovieTaxonomy.Kind.KEYWORD,
 }
+
+
+def store_tmdb_content_ratings(item, ratings):
+    """Replace persisted region ratings after validating the full payload."""
+    if item.source != Sources.TMDB.value or item.media_type not in {
+        MediaTypes.MOVIE.value,
+        MediaTypes.TV.value,
+    }:
+        msg = "TMDB ratings can only be stored for TMDB movies or TV Items."
+        raise ValueError(msg)
+    if not isinstance(ratings, dict):
+        msg = "TMDB rating data must be a region-keyed object."
+        raise TypeError(msg)
+
+    normalized = {}
+    for region, entries in ratings.items():
+        if not isinstance(region, str) or not region or not isinstance(entries, list):
+            msg = f"Invalid TMDB rating region: {region!r}"
+            raise ValueError(msg)
+        if any(not isinstance(entry, dict) for entry in entries):
+            msg = f"Invalid TMDB rating entries for {region}: {entries!r}"
+            raise ValueError(msg)
+        normalized[region] = entries
+
+    metadata, _ = TMDBContentRatingMetadata.objects.get_or_create(item=item)
+    metadata.ratings = normalized
+    metadata.synced_at = timezone.now()
+    metadata.last_attempted_at = metadata.synced_at
+    metadata.save(update_fields=["ratings", "synced_at", "last_attempted_at"])
+    return metadata
+
+
+def mark_tmdb_content_rating_attempt(item):
+    """Record an attempt without changing last-good TMDB rating values."""
+    if item.source != Sources.TMDB.value or item.media_type not in {
+        MediaTypes.MOVIE.value,
+        MediaTypes.TV.value,
+    }:
+        msg = "TMDB rating attempts require a TMDB movie or TV Item."
+        raise ValueError(msg)
+    metadata, _ = TMDBContentRatingMetadata.objects.get_or_create(item=item)
+    metadata.last_attempted_at = timezone.now()
+    metadata.save(update_fields=["last_attempted_at"])
+    return metadata
+
+
+def get_tmdb_content_rating_display(item, region):
+    """Return SQL-backed card and detail rating labels for one region."""
+    if not isinstance(item, Item) or not region or region == "UNSET":
+        return None
+    try:
+        metadata = item.tmdb_content_rating_metadata
+    except TMDBContentRatingMetadata.DoesNotExist:
+        return None
+    if (
+        metadata.synced_at is None
+        or metadata.synced_at < timezone.now() - TMDB_CONTENT_RATING_EVICT_AFTER
+    ):
+        return None
+    entries = metadata.ratings.get(region, [])
+    if item.media_type == MediaTypes.MOVIE.value:
+        labels = list(
+            dict.fromkeys(
+                entry.get("certification", "").strip()
+                for entry in entries
+                if isinstance(entry.get("certification"), str)
+                and entry["certification"].strip()
+            ),
+        )
+        details = [
+            {
+                "label": entry["certification"].strip(),
+                "type": entry.get("type"),
+                "release_type": {
+                    1: "Premiere",
+                    2: "Theatrical limited",
+                    3: "Theatrical",
+                    4: "Digital",
+                    5: "Physical",
+                    6: "TV",
+                }.get(entry.get("type"), ""),
+                "release_date": entry.get("release_date") or "",
+            }
+            for entry in entries
+            if isinstance(entry.get("certification"), str)
+            and entry["certification"].strip()
+        ]
+        return {"region": region, "label": " / ".join(labels), "entries": details}
+    labels = list(
+        dict.fromkeys(
+            entry.get("rating", "").strip()
+            for entry in entries
+            if isinstance(entry.get("rating"), str) and entry["rating"].strip()
+        ),
+    )
+    return {"region": region, "label": " / ".join(labels), "entries": []}
 
 
 def store_tmdb_movie_taxonomies(item, taxonomies):

@@ -495,6 +495,15 @@ def steam_rating_for_item(item, agency):
 
 
 @register.simple_tag
+def tmdb_content_rating_for_item(item, region):
+    """Return the SQL-backed TMDB rating label for a configured region."""
+    from app.metadata import get_tmdb_content_rating_display  # noqa: PLC0415
+
+    display = get_tmdb_content_rating_display(item, region)
+    return display["label"] if display else ""
+
+
+@register.simple_tag
 def steam_rating_agency_label(agency):
     """Return the visible label for a Steam rating system preference."""
     return dict(SteamRatingAgencyChoices.choices).get(agency, "")

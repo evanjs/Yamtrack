@@ -300,9 +300,7 @@ def _filter_person_movie_credits(movie_credits, role):
         elif role == "all":
             matching_roles = cast_roles + crew_roles
         else:
-            matching_roles = [
-                job for job in crew_roles if job.casefold() == role
-            ]
+            matching_roles = [job for job in crew_roles if job.casefold() == role]
         if not matching_roles:
             continue
         filtered.append(
@@ -452,12 +450,18 @@ def _sort_person_tv_credits(tv_credits, sort):
 
 def movie(media_id):
     """Return the metadata for the selected movie from The Movie Database."""
-    cache_key = f"{Sources.TMDB.value}_{MediaTypes.MOVIE.value}_{media_id}"
+    cache_key = f"{Sources.TMDB.value}_{MediaTypes.MOVIE.value}_v2_{media_id}"
     data = cache.get(cache_key)
 
     if data is None:
         url = f"{base_url}/movie/{media_id}"
-        appends = ["recommendations", "external_ids", "credits", "watch/providers"]
+        appends = [
+            "recommendations",
+            "external_ids",
+            "credits",
+            "watch/providers",
+            "release_dates",
+        ]
         params = {
             **base_params,
             "append_to_response": ",".join(appends),
@@ -570,6 +574,9 @@ def movie(media_id):
                 response.get("external_ids", {}), media_id
             ),
             "providers": response.get("watch/providers", {}).get("results", {}),
+            "tmdb_movie_ratings": get_movie_certifications(
+                response.get("release_dates", {}),
+            ),
         }
         if tmdb_taxonomies is not None:
             data["tmdb_taxonomies"] = tmdb_taxonomies
@@ -580,6 +587,10 @@ def movie(media_id):
                 "cast": get_credit_values(cast, credit_type="cast"),
                 "crew": get_credit_values(crew, credit_type="crew"),
             }
+        if isinstance(response.get("release_dates"), dict):
+            data["tmdb_movie_ratings"] = get_movie_certifications(
+                response["release_dates"],
+            )
 
         cache.set(cache_key, data)
 
@@ -761,14 +772,16 @@ def tv_with_seasons(media_id, season_numbers):
 
 def tv(media_id):
     """Return the metadata for the selected tv show from The Movie Database."""
-    cache_key = f"{Sources.TMDB.value}_{MediaTypes.TV.value}_{media_id}"
+    cache_key = f"{Sources.TMDB.value}_{MediaTypes.TV.value}_v2_{media_id}"
     data = cache.get(cache_key)
 
     if data is None:
         url = f"{base_url}/tv/{media_id}"
         params = {
             **base_params,
-            "append_to_response": "recommendations,external_ids,watch/providers",
+            "append_to_response": (
+                "recommendations,external_ids,watch/providers,content_ratings"
+            ),
         }
 
         try:
@@ -838,6 +851,11 @@ def process_tv(response):
         "last_episode_season": last_episode["season_number"] if last_episode else None,
         "next_episode_season": next_episode["season_number"] if next_episode else None,
         "providers": response.get("watch/providers", {}).get("results", {}),
+        **(
+            {"tmdb_tv_ratings": get_tv_content_ratings(response["content_ratings"])}
+            if isinstance(response.get("content_ratings"), dict)
+            else {}
+        ),
     }
 
 
@@ -980,6 +998,86 @@ def get_genres(genres):
 def get_taxonomy_values(values):
     """Return TMDB taxonomy IDs and names without changing their identity."""
     return [{"id": value["id"], "name": value["name"]} for value in values]
+
+
+def get_movie_certifications(response):
+    """Normalize all non-empty movie certifications by release country."""
+    certifications = {}
+    if not isinstance(response, dict):
+        return certifications
+
+    for country in response.get("results", []):
+        if not isinstance(country, dict):
+            continue
+        region = country.get("iso_3166_1")
+        if not isinstance(region, str) or not region:
+            continue
+        values = certifications.setdefault(region, [])
+        for entry in country.get("release_dates", []):
+            if not isinstance(entry, dict):
+                continue
+            certification = entry.get("certification")
+            if not isinstance(certification, str) or not certification.strip():
+                continue
+            values.append(
+                {
+                    "certification": certification.strip(),
+                    "type": entry.get("type"),
+                    "release_date": entry.get("release_date") or "",
+                },
+            )
+        if not values:
+            certifications.pop(region, None)
+    return certifications
+
+
+def get_tv_content_ratings(response):
+    """Normalize all non-empty TV ratings by region."""
+    ratings = {}
+    if not isinstance(response, dict):
+        return ratings
+    for entry in response.get("results", []):
+        if not isinstance(entry, dict):
+            continue
+        region = entry.get("iso_3166_1")
+        rating = entry.get("rating")
+        if (
+            isinstance(region, str)
+            and region
+            and isinstance(rating, str)
+            and rating.strip()
+        ):
+            ratings.setdefault(region, []).append({"rating": rating.strip()})
+    return ratings
+
+
+def content_ratings(media_type, media_id):
+    """Fetch normalized movie or TV ratings for the durable metadata task."""
+    if media_type == MediaTypes.MOVIE.value:
+        endpoint = f"{base_url}/movie/{media_id}/release_dates"
+        parser = get_movie_certifications
+    elif media_type == MediaTypes.TV.value:
+        endpoint = f"{base_url}/tv/{media_id}/content_ratings"
+        parser = get_tv_content_ratings
+    else:
+        msg = f"Unsupported TMDB rating media type: {media_type!r}"
+        raise ValueError(msg)
+
+    cache_key = f"tmdb_content_ratings_{media_type}_{media_id}"
+    data = cache.get(cache_key)
+    if data is None:
+        try:
+            response = services.api_request(
+                Sources.TMDB.value,
+                "GET",
+                endpoint,
+                params=base_params,
+            )
+        except requests.exceptions.HTTPError as error:
+            handle_error(error)
+        data = parser(response)
+        cache.set(cache_key, data)
+    return data
 
 
 def get_credit_values(values, *, credit_type):

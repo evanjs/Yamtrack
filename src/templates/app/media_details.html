@@ -176,6 +176,25 @@
           {% endfor %}
         </div>
 
+        {% if tmdb_content_rating.label %}
+          <section class="mb-4" aria-label="TMDB content rating">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="inline-flex items-center rounded bg-gray-800 px-3 py-1 text-sm text-gray-100">
+                {{ tmdb_content_rating.region }} · {{ tmdb_content_rating.label }}
+              </span>
+            </div>
+            {% if tmdb_content_rating.entries %}
+              <ul class="mt-2 space-y-1 text-xs text-gray-400">
+                {% for entry in tmdb_content_rating.entries %}
+                  <li>
+                    {{ entry.label }}{% if entry.release_type %} · {{ entry.release_type }}{% endif %}{% if entry.release_date %} · {{ entry.release_date }}{% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </section>
+        {% endif %}
+
         {# Description #}
         <div class="mb-6">
           <div x-data="{ isExpanded: false, isClamped: false, checkClamp() { const element = this.$refs.synopsisText; this.isClamped = element.scrollHeight > element.clientHeight; } }"

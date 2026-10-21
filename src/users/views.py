@@ -16,6 +16,7 @@ from app.models import Item, MediaTypes
 from app.providers import tmdb
 from users.forms import NotificationSettingsForm, PasswordChangeForm, UserUpdateForm
 from users.models import (
+    TMDB_CONTENT_RATING_REGION_UNSET,
     WATCH_PROVIDER_REGION_UNSET,
     DateFormatChoices,
     DefaultEditEntryDateChoices,
@@ -223,6 +224,14 @@ def preferences(request):
     media_types = MediaTypes.values
     media_types.remove(MediaTypes.EPISODE.value)
     watch_provider_regions = tmdb.watch_provider_regions()
+    tmdb_content_rating_regions = [
+        (TMDB_CONTENT_RATING_REGION_UNSET, "Disabled"),
+        *[
+            region
+            for region in watch_provider_regions
+            if region[0] not in {"", TMDB_CONTENT_RATING_REGION_UNSET}
+        ],
+    ]
 
     if request.method == "GET":
         return render(
@@ -236,6 +245,7 @@ def preferences(request):
                 "time_format_choices": TimeFormatChoices.choices,
                 "week_start_day_choices": WeekStartDayChoices.choices,
                 "watch_provider_choices": watch_provider_regions,
+                "tmdb_content_rating_region_choices": tmdb_content_rating_regions,
                 "steam_rating_agency_choices": SteamRatingAgencyChoices.choices,
             },
         )
@@ -290,6 +300,12 @@ def preferences(request):
         request.user.watch_provider_region = provider_region
     else:
         request.user.watch_provider_region = WATCH_PROVIDER_REGION_UNSET
+
+    content_rating_region = request.POST.get("tmdb_content_rating_region", "")
+    if content_rating_region in [region[0] for region in tmdb_content_rating_regions]:
+        request.user.tmdb_content_rating_region = content_rating_region
+    else:
+        request.user.tmdb_content_rating_region = TMDB_CONTENT_RATING_REGION_UNSET
 
     steam_rating_agency = request.POST.get("steam_rating_agency")
     if steam_rating_agency in SteamRatingAgencyChoices.values:

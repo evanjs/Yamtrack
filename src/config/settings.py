@@ -594,12 +594,20 @@ CELERY_BEAT_SCHEDULE = {
         "task": "Refresh due TMDB movie taxonomies",
         "schedule": 60 * 60,  # every hour; each run fetches a bounded batch
     },
+    "refresh_due_tmdb_content_ratings": {
+        "task": "Refresh due TMDB content ratings",
+        "schedule": 60 * 60,  # hourly bounded refresh for movies and TV
+    },
     "refresh_due_steam_app_ratings": {
         "task": "Refresh due Steam app ratings",
         "schedule": 60 * 60,  # hourly; each run is limited to 25 tracked games
     },
     "cleanup_expired_tmdb_movie_taxonomies": {
         "task": "Cleanup expired TMDB movie taxonomies",
+        "schedule": 60 * 60 * 24,  # every 24 hours
+    },
+    "cleanup_expired_tmdb_content_ratings": {
+        "task": "Cleanup expired TMDB content ratings",
         "schedule": 60 * 60 * 24,  # every 24 hours
     },
 }

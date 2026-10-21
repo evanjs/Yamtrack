@@ -69,6 +69,7 @@ SpecialModels = [
     "IGDBGameTaxonomy",
     "IGDBGameTaxonomyAssignment",
     "TMDBMovieMetadata",
+    "TMDBContentRatingMetadata",
     "TMDBMovieTaxonomy",
     "TMDBMovieTaxonomyAssignment",
     "TMDBMovieCredit",
