@@ -107,6 +107,7 @@ class MediaDetailsViewTests(TestCase):
                     "media_type": MediaTypes.GAME.value,
                     "media_id": "777",
                     "title": "rated-game",
+
                 },
             ),
         )
@@ -298,6 +299,25 @@ class MediaDetailsViewTests(TestCase):
         )
         self.assertContains(response, "img/ratings/esrb/mature.svg")
         self.assertContains(response, "Blood and Gore")
+    def test_anilist_media_details_view(self):
+        """Test the media details view for an anime from AniList."""
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.ANILIST.value,
+                    "media_type": MediaTypes.ANIME.value,
+                    "media_id": "1",
+                    "title": "cowboy-bebop",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["media"]["title"], "Cowboy Bebop")
+        self.assertContains(response, "https://anilist.co/anime/1")
+        self.assertContains(response, "https://myanimelist.net/anime/1")
+        self.assertContains(response, "Related Manga")
 
     @patch("app.providers.services.get_media_metadata")
     @patch("app.providers.tmdb.process_episodes")

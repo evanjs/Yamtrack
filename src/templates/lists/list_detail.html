@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 {% load app_tags %}
+{% load i18n %}
 
 {% block extra_head %}
   {{ form.media.css }}
@@ -11,6 +12,9 @@
 {% endblock title %}
 
 {% block content %}
+  {% trans "Date Added" as date_added_label %}
+  {% trans "Title" as title_label %}
+  {% trans "Media Type" as media_type_label %}
   <div class="flex items-center justify-between mb-6"
        x-data="listPageState()">
     <div>
@@ -26,9 +30,17 @@
             {% endfor %}
           </div>
           <span class="text-sm text-gray-400">
-            {{ collaborators_count }} collaborator{{ collaborators_count|pluralize }}
+            {% blocktrans trimmed count counter=collaborators_count %}
+              {{ counter }} collaborator
+            {% plural %}
+              {{ counter }} collaborators
+            {% endblocktrans %}
             <span class="mx-2">•</span>
-            {{ items_count }} item{{ items_count|pluralize }}
+            {% blocktrans trimmed count item_count=items_count %}
+              {{ item_count }} item
+            {% plural %}
+              {{ item_count }} items
+            {% endblocktrans %}
           </span>
         </div>
       </div>
@@ -45,6 +57,7 @@
         Export filtered CSV
       </button>
     </div>
+
     {% include "lists/components/list_form.html" %}
 
     <div x-cloak
@@ -94,7 +107,7 @@
       {% if not forloop.last %},{% endif %}
 
     {% endfor %}
-    }, getMediaTypeLabel() { return this.types.length === {{ available_media_types|length }} ? 'All Types' : this.types.map(type => this.mediaTypeLabels[type] || type).join(', '); } }">
+    }, getMediaTypeLabel() { return this.types.length === {{ available_media_types|length }} ? '{% trans "All Types" %}' : this.types.map(type => this.mediaTypeLabels[type] || type).join(', '); } }">
 
     <!-- Form to manage state -->
     <form id="filter-form" class="hidden">
@@ -107,7 +120,7 @@
       {# Search #}
       <div class="relative flex-1">
         <input id="search-input"
-               placeholder="Search in collection..."
+               placeholder="{% trans 'Search in collection...' %}"
                class="w-full py-2 pl-10 pr-4 bg-[#39404b] rounded-md text-white focus:outline-none focus:ring-2 focus:ring-[#4a9eff] appearance-none"
                type="text"
                x-model="query"
@@ -220,6 +233,7 @@
                 </label>
               {% endfor %}
             </form>
+
           </div>
         </div>
 
@@ -230,7 +244,7 @@
                   type="button">
             {% include "app/icons/arrows-up-down.svg" with classes="w-4 h-4" %}
             <span class="text-sm"
-                  x-text="sort === 'date_added' ? 'Date Added' : (sort === 'title' ? 'Title' : 'Media Type')"></span>
+                  x-text="sort === 'date_added' ? '{{ date_added_label|escapejs }}' : (sort === 'title' ? '{{ title_label|escapejs }}' : '{{ media_type_label|escapejs }}')"></span>
             {% include "app/icons/chevron-down.svg" with classes="w-4 h-4" %}
           </button>
 
@@ -258,7 +272,23 @@
         </div>
       </div>
     </div>
-    <div id="items-grid" class="media-grid">{% include "lists/components/media_grid.html" %}</div>
+    <div id="items-grid" class="media-grid">
+    {% if items %}{% include "lists/components/media_grid.html" %}{% else %}
+      <div class="flex flex-col items-center justify-center py-16 bg-[#2a2f35] rounded-lg">
+        <div class="text-center max-w-md mx-auto p-6">
+          <div class="bg-[#39404b] rounded-full p-4 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+            {% include "app/icons/list-add.svg" with classes="w-8 h-8 text-gray-400" %}
+          </div>
+          <h3 class="text-xl font-semibold mb-2">{% trans "No items in this list yet" %}</h3>
+          <p class="text-gray-400 mb-6">{% trans "Start adding your favorite media to build your collection" %}</p>
+          <div class="pt-4">
+            <a href="{{ 'tv'|sample_search }}"
+               class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">{% trans "Browse Media" %}</a>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+    </div>
 
     <div id="loading-indicator" class="htmx-indicator text-center pt-8">
       <div class="inline-flex justify-center items-center">
