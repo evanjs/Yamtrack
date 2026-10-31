@@ -562,7 +562,7 @@
                   {% for name, url in media.external_links.items %}
                     <a href="{{ url }}"
                        class="block text-sm text-gray-200 hover:text-indigo-400 transition-colors duration-200"
-                       {% if name == "Steam" or name == "Trakt" or name == "Hardcover" or name == "IMDb" or name == "Letterboxd" or name == "MyAnimeList" %}
+                       {% if name == "Steam" or name == "Trakt" or name == "Hardcover" or name == "IMDb" or name == "IMDb Parent's Guide" or name == "Letterboxd" or name == "MyAnimeList" %}
                          target="_self"
                        {% else %}
                          target="_blank"

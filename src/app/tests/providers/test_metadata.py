@@ -75,6 +75,13 @@ class Metadata(TestCase):
     def test_tmdb_external_links_include_trakt_for_movies_and_shows(self):
         """Build Trakt links only when a resolved URL is available."""
         self.assertEqual(
+            tmdb.get_external_links({"imdb_id": "tt0133093"})[
+                "IMDb Parent's Guide"
+            ],
+            "https://www.imdb.com/title/tt0133093/parentalguide/",
+        )
+        self.assertNotIn("IMDb Parent's Guide", tmdb.get_external_links({}))
+        self.assertEqual(
             tmdb.get_external_links(
                 {},
                 123,

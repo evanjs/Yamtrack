@@ -50,6 +50,9 @@ def get_external_links(external_ids, tmdb_id=None, media_type=None, trakt_link=N
 
     if external_ids.get("imdb_id"):
         links["IMDb"] = f"https://www.imdb.com/title/{external_ids['imdb_id']}/"
+        links["IMDb Parent's Guide"] = (
+            f"https://www.imdb.com/title/{external_ids['imdb_id']}/parentalguide/"
+        )
 
     if external_ids.get("tvdb_id"):
         links["TVDB"] = (
