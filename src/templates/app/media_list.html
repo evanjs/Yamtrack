@@ -14,7 +14,7 @@
     {{ media_type|media_type_readable_plural }}
   </h1>
 
-  <div x-data="{ sort: '{{ current_sort }}', status: '{{ current_status }}', layout: '{{ current_layout }}', search: '{{ request.GET.search|default:'' }}', statusLabels: { {% for value, label in status_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} }, sortLabels: { {% for value, label in sort_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} }">
+  <div x-data="{ sort: '{{ current_sort }}', status: '{{ current_status }}', layout: '{{ current_layout }}', search: '{{ request.GET.search|default:'' }}', statusLabels: { {% for value, label in status_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} }, sortLabels: { {% for value, label in sort_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} } }">
 
     {% if request.user == target_user %}
       <a class="inline-flex items-center gap-2 px-4 py-2 mb-4 bg-[#39404b] rounded-md hover:bg-[#454d5a]"
@@ -23,7 +23,14 @@
     {% endif %}
 
     <!-- Form to manage state -->
-    <form id="filter-form" class="hidden">
+    <form id="filter-form"
+          x-ref="filterForm"
+          class="hidden"
+          hx-get="{% url 'medialist' target_user.username media_type %}"
+          hx-trigger="submit"
+          {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
+          hx-include="#taxonomy-filter-form,#credit-filter-form"
+          hx-indicator="#loading-indicator">
       <input type="hidden" name="sort" x-model="sort">
       <input type="hidden" name="status" x-model="status">
       <input type="hidden" name="search" x-model="search">
@@ -38,7 +45,7 @@
                type="text"
                x-model="search"
                hx-get="{% url 'medialist' target_user.username media_type %}"
-               hx-trigger="keyup changed delay:300ms, search"
+               hx-trigger="input changed delay:300ms, search"
                {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
                hx-include="#filter-form,#taxonomy-filter-form,#credit-filter-form"
                hx-indicator="#search-indicator">
@@ -211,13 +218,10 @@
                x-transition:leave-start="transform opacity-100 scale-100"
                x-transition:leave-end="transform opacity-0 scale-95">
             {% for value, label in status_choices %}
-              <button hx-get="{% url 'medialist' target_user.username media_type %}"
-                      {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
-                      hx-include="#filter-form,#taxonomy-filter-form,#credit-filter-form"
-                      hx-indicator="#loading-indicator"
+              <button
                       class="block w-full px-4 py-2 text-left text-sm transition-colors cursor-pointer"
                       :class="status === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
-                      @click="status = '{{ value }}'; open = false"
+                      @click="status = '{{ value }}'; open = false; $nextTick(() => htmx.trigger($refs.filterForm, 'submit'))"
                       type="button">{{ label }}</button>
             {% endfor %}
           </div>

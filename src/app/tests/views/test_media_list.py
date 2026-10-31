@@ -239,6 +239,10 @@ class MediaListViewTests(TestCase):
         self.assertEqual(response.context["current_layout"], "table")
 
         self.assertEqual(response.context["media_list"].paginator.count, 2)
+        self.assertContains(response, 'hx-trigger="submit"')
+        self.assertContains(response, "htmx.trigger($refs.filterForm, 'submit')")
+        self.assertContains(response, 'hx-trigger="input changed delay:300ms, search"')
+        self.assertRegex(response.content.decode(), r"(?s)sortLabels:.*?End Date[^}]*}\s*}")
 
         self.user.refresh_from_db()
         self.assertEqual(self.user.movie_status, Status.COMPLETED.value)
