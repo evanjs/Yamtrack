@@ -28,6 +28,78 @@ mock_path = Path(__file__).resolve().parent.parent / "mock_data"
 class Metadata(TestCase):
     """Test the external API calls for media details."""
 
+    @patch("app.providers.tmdb.services.api_request")
+    def test_tmdb_trakt_lookup_builds_direct_link_from_slug(self, mock_api_request):
+        """Resolve a movie TMDB ID to its Trakt website slug."""
+        mock_api_request.return_value = [
+            {
+                "type": "movie",
+                "movie": {"ids": {"slug": "sol-bianca-1990"}},
+            },
+        ]
+
+        result = tmdb.get_trakt_link(398613, MediaTypes.MOVIE.value)
+
+        self.assertEqual(result, "https://trakt.tv/movies/sol-bianca-1990")
+        mock_api_request.assert_called_once_with(
+            "trakt",
+            "GET",
+            "https://api.trakt.tv/search/tmdb/398613",
+            params={"type": "movie"},
+            headers={
+                "trakt-api-version": "2",
+                "trakt-api-key": settings.TRAKT_API,
+                "Content-Type": "application/json",
+            },
+        )
+
+    @patch("app.providers.tmdb.services.api_request")
+    def test_tmdb_trakt_lookup_uses_show_endpoint_type(self, mock_api_request):
+        """Resolve TV IDs into direct Trakt show links."""
+        mock_api_request.return_value = [
+            {"type": "show", "show": {"ids": {"slug": "example-show"}}},
+        ]
+
+        self.assertEqual(
+            tmdb.get_trakt_link(100, MediaTypes.TV.value),
+            "https://trakt.tv/shows/example-show",
+        )
+        self.assertEqual(mock_api_request.call_args.kwargs["params"], {"type": "show"})
+
+    @patch("app.providers.tmdb.services.api_request", side_effect=requests.Timeout)
+    def test_tmdb_trakt_lookup_failure_is_optional(self, mock_api_request):
+        """A failed Trakt lookup doesn't prevent rendering media details."""
+        self.assertIsNone(tmdb.get_trakt_link(100, MediaTypes.MOVIE.value))
+        mock_api_request.assert_called_once()
+
+    def test_tmdb_external_links_include_trakt_for_movies_and_shows(self):
+        """Build Trakt links only when a resolved URL is available."""
+        self.assertEqual(
+            tmdb.get_external_links(
+                {},
+                123,
+                MediaTypes.MOVIE.value,
+                trakt_link="https://trakt.tv/movies/movie-123",
+            ),
+            {
+                "Trakt": "https://trakt.tv/movies/movie-123",
+                "Letterboxd": "https://www.letterboxd.com/tmdb/123",
+            },
+        )
+        self.assertEqual(
+            tmdb.get_external_links(
+                {},
+                456,
+                MediaTypes.TV.value,
+                trakt_link="https://trakt.tv/shows/show-456",
+            ),
+            {"Trakt": "https://trakt.tv/shows/show-456"},
+        )
+        self.assertEqual(
+            tmdb.get_external_links({}, 456, MediaTypes.TV.value),
+            {},
+        )
+
     def test_anime(self):
         """Test the metadata method for anime."""
         response = mal.anime("1")
@@ -592,6 +664,7 @@ class Metadata(TestCase):
                 "vote_count": 100,
                 "recommendations": {"results": []},
                 "release_date": "2024-01-01",
+                "external_ids": {},
                 "status": "Released",
                 "runtime": 90,
                 "production_companies": [],
@@ -599,6 +672,9 @@ class Metadata(TestCase):
                 "spoken_languages": [],
             },
             {"keywords": []},
+            [
+                {"type": "movie", "movie": {"ids": {"slug": "example-movie"}}},
+            ],
         ]
 
         metadata = tmdb.movie("321")
@@ -618,6 +694,10 @@ class Metadata(TestCase):
                     },
                 ],
             },
+        )
+        self.assertEqual(
+            metadata["external_links"]["Trakt"],
+            "https://trakt.tv/movies/example-movie",
         )
         self.assertIn(
             "credits",

@@ -132,7 +132,7 @@ def get_tmdb_rating_for_details(source, media_type, media_id, region):
 def get_metadata_sync_cache_key(source, media_type, media_id, season_number):
     """Return the active cache key for a metadata sync request."""
     version = (
-        "_v2"
+        "_v3"
         if source == Sources.TMDB.value
         and media_type in {MediaTypes.MOVIE.value, MediaTypes.TV.value}
         else ""

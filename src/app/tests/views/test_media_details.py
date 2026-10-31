@@ -91,9 +91,12 @@ class MediaDetailsViewTests(TestCase):
             "media_type": MediaTypes.GAME.value,
             "source": Sources.IGDB.value,
             "image": "https://example.com/game.jpg",
+            "details": {"format": "Game"},
             "genres": [],
             "screenshots": [],
             "external_links": {
+                "Steam": "https://store.steampowered.com/app/292030/",
+                "Trakt": "https://trakt.tv/movies/rated-game-2024",
                 "ProtonDB": "https://www.protondb.com/app/292030",
             },
             "steam_app_id": "292030",
@@ -127,6 +130,15 @@ class MediaDetailsViewTests(TestCase):
         self.assertContains(response, 'class="uppercase">Gold</span>')
         self.assertContains(response, "Trending tier: Gold")
         self.assertContains(response, 'href="https://www.protondb.com/app/292030"')
+        rendered = response.content.decode()
+        self.assertRegex(
+            rendered,
+            r'(?s)<a href="https://store\.steampowered\.com/app/292030/".*?target="_self".*?>Steam</a>',
+        )
+        self.assertRegex(
+            rendered,
+            r'(?s)<a href="https://trakt\.tv/movies/rated-game-2024".*?target="_self".*?>Trakt</a>',
+        )
         mock_protondb_summary.assert_called_once_with("292030")
 
     @patch("app.providers.services.get_media_metadata")

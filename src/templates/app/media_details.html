@@ -562,7 +562,11 @@
                   {% for name, url in media.external_links.items %}
                     <a href="{{ url }}"
                        class="block text-sm text-gray-200 hover:text-indigo-400 transition-colors duration-200"
-                       target="_blank">{{ name }}</a>
+                       {% if name == "Steam" or name == "Trakt" %}
+                         target="_self"
+                       {% else %}
+                         target="_blank"
+                       {% endif %}>{{ name }}</a>
                   {% endfor %}
                 </div>
               </div>

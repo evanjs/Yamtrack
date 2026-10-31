@@ -44,7 +44,7 @@ def handle_error(error):
     )
 
 
-def get_external_links(external_ids, tmdb_id=None):
+def get_external_links(external_ids, tmdb_id=None, media_type=None, trakt_link=None):
     """Build external links dictionary from TMDB external_ids response."""
     links = {}
 
@@ -61,14 +61,65 @@ def get_external_links(external_ids, tmdb_id=None):
             f"https://www.wikidata.org/wiki/{external_ids['wikidata_id']}"
         )
 
-    # Only passed in for movies as Letterboxd seldom supports TV
-    if tmdb_id:
+    if trakt_link:
+        links["Trakt"] = trakt_link
+
+    # Letterboxd seldom supports TV, so only link movies.
+    if tmdb_id and media_type == "movie":
         # https://letterboxd.com/about/film-data/
         # Letterboxd will redirect to the correct movie
         # as they source their data from TMDB
         links["Letterboxd"] = f"https://www.letterboxd.com/tmdb/{tmdb_id}"
 
     return links
+
+
+def get_trakt_link(tmdb_id, media_type):
+    """Resolve a TMDB ID to a direct Trakt movie or show URL."""
+    trakt_type = {
+        MediaTypes.MOVIE.value: "movie",
+        MediaTypes.TV.value: "show",
+    }.get(media_type)
+    if not tmdb_id or not trakt_type or not settings.TRAKT_API:
+        return None
+
+    try:
+        results = services.api_request(
+            "trakt",
+            "GET",
+            f"https://api.trakt.tv/search/tmdb/{tmdb_id}",
+            params={"type": trakt_type},
+            headers={
+                "trakt-api-version": "2",
+                "trakt-api-key": settings.TRAKT_API,
+                "Content-Type": "application/json",
+            },
+        )
+    except requests.exceptions.RequestException as error:
+        logger.warning("Failed to resolve TMDB ID %s on Trakt: %s", tmdb_id, error)
+        return None
+
+    if not isinstance(results, list):
+        return None
+
+    for result in results:
+        if not isinstance(result, dict) or result.get("type") != trakt_type:
+            continue
+        media = result.get(trakt_type) or {}
+        slug = (media.get("ids") or {}).get("slug")
+        if slug:
+            trakt_path = "movies" if trakt_type == "movie" else "shows"
+            return f"https://trakt.tv/{trakt_path}/{slug}"
+    return None
+
+
+def add_trakt_link(metadata, tmdb_id, media_type, provider_response):
+    """Add the optional direct Trakt link when TMDB returned external IDs."""
+    if "external_ids" not in provider_response:
+        return
+    link = get_trakt_link(tmdb_id, media_type)
+    if link:
+        metadata.setdefault("external_links", {})["Trakt"] = link
 
 
 def search(media_type, query, page, *, show_adult_titles=True):
@@ -453,7 +504,7 @@ def _sort_person_tv_credits(tv_credits, sort):
 
 def movie(media_id):
     """Return the metadata for the selected movie from The Movie Database."""
-    cache_key = f"{Sources.TMDB.value}_{MediaTypes.MOVIE.value}_v2_{media_id}"
+    cache_key = f"{Sources.TMDB.value}_{MediaTypes.MOVIE.value}_v3_{media_id}"
     data = cache.get(cache_key)
 
     if data is None:
@@ -574,7 +625,7 @@ def movie(media_id):
                 ),
             },
             "external_links": get_external_links(
-                response.get("external_ids", {}), media_id
+                response.get("external_ids", {}), media_id, MediaTypes.MOVIE.value
             ),
             "providers": response.get("watch/providers", {}).get("results", {}),
             "tmdb_movie_ratings": get_movie_certifications(
@@ -590,6 +641,7 @@ def movie(media_id):
                 "cast": get_credit_values(cast, credit_type="cast"),
                 "crew": get_credit_values(crew, credit_type="crew"),
             }
+        add_trakt_link(data, media_id, MediaTypes.MOVIE.value, response)
         if isinstance(response.get("release_dates"), dict):
             data["tmdb_movie_ratings"] = get_movie_certifications(
                 response["release_dates"],
@@ -710,7 +762,8 @@ def fetch_and_cache_seasons(media_id, season_numbers, tv_data):
         # Cache TV metadata if we haven't fetched it yet
         if fetched_tv_data is None:
             fetched_tv_data = process_tv(response)
-            tv_cache_key = f"{Sources.TMDB.value}_{MediaTypes.TV.value}_{media_id}"
+            add_trakt_link(fetched_tv_data, media_id, MediaTypes.TV.value, response)
+            tv_cache_key = f"{Sources.TMDB.value}_{MediaTypes.TV.value}_v3_{media_id}"
             cache.set(tv_cache_key, fetched_tv_data)
 
         # Process and cache each season
@@ -758,7 +811,7 @@ def tv_with_seasons(media_id, season_numbers):
     if not season_numbers:
         return tv(media_id)
 
-    tv_cache_key = f"{Sources.TMDB.value}_{MediaTypes.TV.value}_{media_id}"
+    tv_cache_key = f"{Sources.TMDB.value}_{MediaTypes.TV.value}_v3_{media_id}"
     tv_data = cache.get(tv_cache_key)
 
     cached_seasons, uncached_seasons = get_cached_seasons(media_id, season_numbers)
@@ -783,7 +836,7 @@ def tv_with_seasons(media_id, season_numbers):
 
 def tv(media_id):
     """Return the metadata for the selected tv show from The Movie Database."""
-    cache_key = f"{Sources.TMDB.value}_{MediaTypes.TV.value}_v2_{media_id}"
+    cache_key = f"{Sources.TMDB.value}_{MediaTypes.TV.value}_v3_{media_id}"
     data = cache.get(cache_key)
 
     if data is None:
@@ -806,6 +859,7 @@ def tv(media_id):
             handle_error(error)
 
         data = process_tv(response)
+        add_trakt_link(data, media_id, MediaTypes.TV.value, response)
         cache.set(cache_key, data)
 
     return data
@@ -858,7 +912,9 @@ def process_tv(response):
             ),
         },
         "tvdb_id": response.get("external_ids", {}).get("tvdb_id"),
-        "external_links": get_external_links(response.get("external_ids", {})),
+        "external_links": get_external_links(
+            response.get("external_ids", {}), response["id"], MediaTypes.TV.value
+        ),
         "last_episode_season": last_episode["season_number"] if last_episode else None,
         "next_episode_season": next_episode["season_number"] if next_episode else None,
         "providers": response.get("watch/providers", {}).get("results", {}),
