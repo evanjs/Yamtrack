@@ -97,6 +97,10 @@ class MediaDetailsViewTests(TestCase):
             "external_links": {
                 "Steam": "https://store.steampowered.com/app/292030/",
                 "Trakt": "https://trakt.tv/movies/rated-game-2024",
+                "Hardcover": "https://hardcover.app/books/123",
+                "IMDb": "https://www.imdb.com/title/tt1234567/",
+                "Letterboxd": "https://letterboxd.com/film/example/",
+                "MyAnimeList": "https://myanimelist.net/anime/123",
                 "ProtonDB": "https://www.protondb.com/app/292030",
             },
             "steam_app_id": "292030",
@@ -139,6 +143,17 @@ class MediaDetailsViewTests(TestCase):
             rendered,
             r'(?s)<a href="https://trakt\.tv/movies/rated-game-2024".*?target="_self".*?>Trakt</a>',
         )
+        for name, url in (
+            ("Hardcover", "https://hardcover.app/books/123"),
+            ("IMDb", "https://www.imdb.com/title/tt1234567/"),
+            ("Letterboxd", "https://letterboxd.com/film/example/"),
+            ("MyAnimeList", "https://myanimelist.net/anime/123"),
+        ):
+            with self.subTest(name=name):
+                self.assertRegex(
+                    rendered,
+                    rf'(?s)<a href="{url}".*?target="_self".*?>{name}</a>',
+                )
         mock_protondb_summary.assert_called_once_with("292030")
 
     @patch("app.providers.services.get_media_metadata")
