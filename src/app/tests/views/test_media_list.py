@@ -132,6 +132,16 @@ class MediaListViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_filtered_csv_export_accepts_post_filters(self):
+        """POST exports support long filter sets without URL-size limits."""
+        response = self.client.post(
+            reverse("media_list_export_csv", args=[self.user.username, "movie"]),
+            {"status": Status.COMPLETED.value, "search": "Test Movie"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertEqual(response.content.decode().count("Test Movie"), 2)
+
     def test_single_type_list_shows_filtered_export_control_only_for_owner(self):
         """Filtered CSV control is rendered only for the current user's list."""
         self.external_user.profile_private = False
@@ -143,6 +153,10 @@ class MediaListViewTests(TestCase):
             reverse("medialist", args=[self.external_user.username, "movie"]),
         )
         self.assertContains(own, "Export filtered CSV")
+        self.assertContains(
+            own,
+            f'href="{reverse("media_list_export_csv", args=[self.user.username, "movie"])}"',
+        )
         self.assertNotContains(other, "Export filtered CSV")
 
     def test_export_columns_cover_anime_and_manga_progress(self):

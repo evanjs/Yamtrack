@@ -946,29 +946,30 @@ def media_list(request, username, media_type):
     return render(request, template_name, context)
 
 
-@require_GET
+@require_http_methods(["GET", "POST"])
 def media_list_export_csv(request, username, media_type):
     """Export all rows matching the current user's media-list filters."""
     if request.user.is_anonymous or request.user.username != username:
         raise Http404
 
+    filters = request.GET if request.method == "GET" else request.POST
     status_filter = request.user.get_valid_preference(
-        f"{media_type}_status", request.GET.get("status")
+        f"{media_type}_status", filters.get("status")
     ) or "all"
     _label, _current, taxonomy_filters, _options = get_media_taxonomy_filter_context(
-        request.user, media_type, request.GET
+        request.user, media_type, filters
     )
     credit_filters, credit_match, _roles = get_tmdb_movie_credit_filter_context(
-        request.user, media_type, request.GET
+        request.user, media_type, filters
     )
     queryset = BasicMedia.objects.get_media_list(
         user=request.user,
         media_type=media_type,
         status_filter=status_filter,
         sort_filter=request.user.get_valid_preference(
-            f"{media_type}_sort", request.GET.get("sort")
+            f"{media_type}_sort", filters.get("sort")
         ),
-        search=request.GET.get("search", ""),
+        search=filters.get("search", ""),
         taxonomy_filters=taxonomy_filters or None,
         credit_filters=credit_filters or None,
         credit_match=credit_match,

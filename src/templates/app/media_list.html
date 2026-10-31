@@ -18,8 +18,15 @@
 
     {% if request.user == target_user %}
       <a class="inline-flex items-center gap-2 px-4 py-2 mb-4 bg-[#39404b] rounded-md hover:bg-[#454d5a]"
-         :href="`{% url 'media_list_export_csv' target_user.username media_type %}?${new URLSearchParams(new FormData(document.getElementById('filter-form'))).toString()}&${new URLSearchParams(new FormData(document.getElementById('taxonomy-filter-form') || document.createElement('form'))).toString()}&${new URLSearchParams(new FormData(document.getElementById('credit-filter-form') || document.createElement('form'))).toString()}`"
+         id="filtered-csv-export"
+         href="{% url 'media_list_export_csv' target_user.username media_type %}"
          download>Export filtered CSV</a>
+      <form id="filtered-csv-export-form"
+            method="post"
+            action="{% url 'media_list_export_csv' target_user.username media_type %}"
+            class="hidden">
+        {% csrf_token %}
+      </form>
     {% endif %}
 
     <!-- Form to manage state -->
@@ -397,6 +404,31 @@
 
 {% block js %}
   {{ block.super }}
+  <script>
+    (() => {
+      const link = document.getElementById("filtered-csv-export");
+      const exportForm = document.getElementById("filtered-csv-export-form");
+      if (!link || !exportForm) return;
+
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        exportForm.querySelectorAll("[data-export-filter]").forEach((input) => input.remove());
+        ["filter-form", "taxonomy-filter-form", "credit-filter-form"].forEach((id) => {
+          const sourceForm = document.getElementById(id);
+          if (!sourceForm) return;
+          new FormData(sourceForm).forEach((value, name) => {
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = name;
+            input.value = value;
+            input.dataset.exportFilter = "";
+            exportForm.append(input);
+          });
+        });
+        exportForm.requestSubmit();
+      });
+    })();
+  </script>
   {% if has_credit_options %}
     <script>
       (() => {
