@@ -85,6 +85,82 @@ class MediaListViewTests(TestCase):
             app_tags.media_type_readable_plural(MediaTypes.MOVIE.value).lower(),
         )
 
+    def test_filtered_csv_export_is_unpaginated_and_private(self):
+        """CSV export follows filters, includes every match, and denies other users."""
+        items = [
+            Item.objects.create(
+                media_id=f"export-{index}",
+                source=Sources.TMDB.value,
+                media_type=MediaTypes.MOVIE.value,
+                title=f"Export Movie {index}",
+                image="http://example.com/image.jpg",
+            )
+            for index in range(40)
+        ]
+        Movie.objects.bulk_create(
+            [
+                Movie(
+                    item=item,
+                    user=self.user,
+                    status=(
+                        Status.COMPLETED.value
+                        if index % 2 == 0
+                        else Status.PLANNING.value
+                    ),
+                )
+                for index, item in enumerate(items)
+            ]
+        )
+
+        response = self.client.get(
+            reverse("media_list_export_csv", args=[self.user.username, "movie"]),
+            {"status": Status.COMPLETED.value, "search": "Export Movie"},
+        )
+        self.assertEqual(response.status_code, 200)
+        exported = response.content.decode()
+        self.assertEqual(exported.count("Export Movie"), 20)
+        self.assertNotIn("Test Movie", exported)
+
+        response = self.client.get(
+            reverse(
+                "media_list_export_csv",
+                args=[self.external_user.username, "movie"],
+            ),
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_single_type_list_shows_filtered_export_control_only_for_owner(self):
+        """Filtered CSV control is rendered only for the current user's list."""
+        self.external_user.profile_private = False
+        self.external_user.save(update_fields=["profile_private"])
+        own = self.client.get(
+            reverse("medialist", args=[self.user.username, "movie"]),
+        )
+        other = self.client.get(
+            reverse("medialist", args=[self.external_user.username, "movie"]),
+        )
+        self.assertContains(own, "Export filtered CSV")
+        self.assertNotContains(other, "Export filtered CSV")
+
+    def test_export_columns_cover_anime_and_manga_progress(self):
+        """Anime and manga CSVs expose their tracking progress columns."""
+        for media_type, progress_column in (
+            ("anime", "episodes_watched"),
+            ("manga", "chapters_read"),
+        ):
+            with self.subTest(media_type=media_type):
+                response = self.client.get(
+                    reverse(
+                        "media_list_export_csv",
+                        args=[self.user.username, media_type],
+                    ),
+                )
+                self.assertEqual(response.status_code, 200)
+                header = response.content.decode().splitlines()[0]
+                self.assertIn(progress_column, header)
+                self.assertIn("status", header)
+                self.assertNotIn("volumes_read", header)
+
     def test_empty_media_list_labels_use_singular_and_plural(self):
         """The empty state uses a singular title and plural description."""
         self.addCleanup(translation.deactivate)

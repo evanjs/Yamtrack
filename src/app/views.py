@@ -1,3 +1,4 @@
+import csv
 import logging
 from datetime import date
 from pathlib import Path
@@ -943,6 +944,68 @@ def media_list(request, username, media_type):
         template_name = "app/media_list.html"
 
     return render(request, template_name, context)
+
+
+@require_GET
+def media_list_export_csv(request, username, media_type):
+    """Export all rows matching the current user's media-list filters."""
+    if request.user.is_anonymous or request.user.username != username:
+        raise Http404
+
+    status_filter = request.user.get_valid_preference(
+        f"{media_type}_status", request.GET.get("status")
+    ) or "all"
+    _label, _current, taxonomy_filters, _options = get_media_taxonomy_filter_context(
+        request.user, media_type, request.GET
+    )
+    credit_filters, credit_match, _roles = get_tmdb_movie_credit_filter_context(
+        request.user, media_type, request.GET
+    )
+    queryset = BasicMedia.objects.get_media_list(
+        user=request.user,
+        media_type=media_type,
+        status_filter=status_filter,
+        sort_filter=request.user.get_valid_preference(
+            f"{media_type}_sort", request.GET.get("sort")
+        ),
+        search=request.GET.get("search", ""),
+        taxonomy_filters=taxonomy_filters or None,
+        credit_filters=credit_filters or None,
+        credit_match=credit_match,
+        include_unknown_taxonomy=getattr(
+            request.user,
+            "include_unknown_taxonomy",
+            False,
+        ),
+    ).select_related("item")
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = (
+        f'attachment; filename="{media_type}-filtered.csv"'
+    )
+    writer = csv.writer(response)
+    progress_column = {
+        MediaTypes.ANIME.value: "episodes_watched",
+        MediaTypes.MANGA.value: "chapters_read",
+    }.get(media_type, "progress")
+    columns = ["title", "media_id", "source", "status", "score", progress_column]
+    columns += ["progressed_at", "start_date", "end_date", "notes"]
+    writer.writerow(columns)
+    for media in queryset.iterator(chunk_size=500):
+        row = [
+            media.item.title,
+            media.item.media_id,
+            media.item.source,
+            media.status,
+            media.score,
+            media.progress,
+            media.progressed_at,
+            media.start_date,
+            media.end_date,
+            media.notes,
+        ]
+        writer.writerow(row)
+    return response
 
 
 @require_GET

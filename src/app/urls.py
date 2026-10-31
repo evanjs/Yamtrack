@@ -25,6 +25,11 @@ urlpatterns = [
         name="tmdb_person_age",
     ),
     path("search", views.media_search, name="search"),
+    path(
+        "<str:username>/<media_type:media_type>/export/csv",
+        views.media_list_export_csv,
+        name="media_list_export_csv",
+    ),
     path("<str:username>/<media_type:media_type>", views.media_list, name="medialist"),
     path(
         "details/<source:source>/<media_type:media_type>/<str:media_id>/<str:title>",

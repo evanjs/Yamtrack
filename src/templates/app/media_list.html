@@ -14,7 +14,13 @@
     {{ media_type|media_type_readable_plural }}
   </h1>
 
-  <div x-data="{ sort: '{{ current_sort }}', status: '{{ current_status }}', layout: '{{ current_layout }}', search: '{{ request.GET.search|default:'' }}', statusLabels: { {% for value, label in status_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} }, sortLabels: { {% for value, label in sort_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} } }">
+  <div x-data="{ sort: '{{ current_sort }}', status: '{{ current_status }}', layout: '{{ current_layout }}', search: '{{ request.GET.search|default:'' }}', statusLabels: { {% for value, label in status_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} }, sortLabels: { {% for value, label in sort_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} }">
+
+    {% if request.user == target_user %}
+      <a class="inline-flex items-center gap-2 px-4 py-2 mb-4 bg-[#39404b] rounded-md hover:bg-[#454d5a]"
+         :href="`{% url 'media_list_export_csv' target_user.username media_type %}?${new URLSearchParams(new FormData(document.getElementById('filter-form'))).toString()}&${new URLSearchParams(new FormData(document.getElementById('taxonomy-filter-form') || document.createElement('form'))).toString()}&${new URLSearchParams(new FormData(document.getElementById('credit-filter-form') || document.createElement('form'))).toString()}`"
+         download>Export filtered CSV</a>
+    {% endif %}
 
     <!-- Form to manage state -->
     <form id="filter-form" class="hidden">
