@@ -1,3 +1,6 @@
+import csv
+from io import StringIO
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -160,6 +163,28 @@ class MediaListViewTests(TestCase):
                 self.assertIn(progress_column, header)
                 self.assertIn("status", header)
                 self.assertNotIn("volumes_read", header)
+
+    def test_csv_export_neutralizes_spreadsheet_formula_values(self):
+        """Formula-like titles and notes are exported as text, not formulas."""
+        item = Item.objects.create(
+            media_id="formula-title",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.MOVIE.value,
+            title="=1+1",
+            image="http://example.com/image.jpg",
+        )
+        Movie.objects.bulk_create(
+            [Movie(item=item, user=self.user, notes="\t=1+1")],
+        )
+
+        response = self.client.get(
+            reverse("media_list_export_csv", args=[self.user.username, "movie"]),
+        )
+        rows = list(csv.reader(StringIO(response.content.decode())))
+        exported = next(row for row in rows[1:] if row[1] == "formula-title")
+
+        self.assertEqual(exported[0], "'=1+1")
+        self.assertEqual(exported[9], "'\t=1+1")
 
     def test_empty_media_list_labels_use_singular_and_plural(self):
         """The empty state uses a singular title and plural description."""

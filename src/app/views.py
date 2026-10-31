@@ -1004,8 +1004,20 @@ def media_list_export_csv(request, username, media_type):
             media.end_date,
             media.notes,
         ]
-        writer.writerow(row)
+        writer.writerow(_neutralize_csv_formulas(row))
     return response
+
+
+def _neutralize_csv_formulas(row):
+    """Prefix formula-like text cells so spreadsheet software treats them as text."""
+    formula_prefixes = ("=", "+", "-", "@")
+    return [
+        f"'{value}"
+        if isinstance(value, str)
+        and value.lstrip(" \t\r\n").startswith(formula_prefixes)
+        else value
+        for value in row
+    ]
 
 
 @require_GET
