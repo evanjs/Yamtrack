@@ -128,7 +128,7 @@
       {% if steam_rating %}
         {% steam_rating_agency_label request.user.steam_rating_agency as steam_rating_label %}
         <div class="mt-2">
-          <span class="inline-flex items-center rounded bg-gray-900/70 px-2 py-1 text-xs text-gray-200"
+          <span class="inline-flex items-center rounded bg-gray-900/70 py-1 text-xs text-gray-200"
                 title="Steam content rating ({{ steam_rating_label }})">{{ steam_rating_label }}: {{ steam_rating }}</span>
         </div>
       {% endif %}
@@ -138,7 +138,7 @@
         {% tmdb_content_rating_for_item item request.user.tmdb_content_rating_region as tmdb_rating %}
         {% if tmdb_rating.label %}
           <div class="mt-2">
-            <span class="inline-flex items-center rounded bg-gray-900/70 px-2 py-1 text-xs text-gray-200"
+            <span class="inline-flex items-center rounded bg-gray-900/70 py-1 text-xs text-gray-200"
                   title="TMDB content rating ({{ tmdb_rating.region }})">{{ tmdb_rating.region }} · {{ tmdb_rating.label }}</span>
           </div>
         {% endif %}
