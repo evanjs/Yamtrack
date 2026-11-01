@@ -153,10 +153,10 @@ class MediaListViewTests(TestCase):
             reverse("medialist", args=[self.external_user.username, "movie"]),
         )
         self.assertContains(own, "Export filtered CSV")
-        self.assertContains(
-            own,
-            f'href="{reverse("media_list_export_csv", args=[self.user.username, "movie"])}"',
-        )
+        self.assertContains(own, "CSV export ready")
+        self.assertContains(own, "Share CSV")
+        self.assertContains(own, "Back to list")
+        self.assertContains(own, "navigator.share")
         self.assertNotContains(other, "Export filtered CSV")
 
     def test_export_columns_cover_anime_and_manga_progress(self):

@@ -17,16 +17,34 @@
   <div x-data="{ sort: '{{ current_sort }}', status: '{{ current_status }}', layout: '{{ current_layout }}', search: '{{ request.GET.search|default:'' }}', statusLabels: { {% for value, label in status_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} }, sortLabels: { {% for value, label in sort_choices %} '{{ value }}': '{{ label }}' {% if not forloop.last %},{% endif %}  {% endfor %} } }">
 
     {% if request.user == target_user %}
-      <a class="inline-flex items-center gap-2 px-4 py-2 mb-4 bg-[#39404b] rounded-md hover:bg-[#454d5a]"
-         id="filtered-csv-export"
-         href="{% url 'media_list_export_csv' target_user.username media_type %}"
-         download>Export filtered CSV</a>
-      <form id="filtered-csv-export-form"
-            method="post"
-            action="{% url 'media_list_export_csv' target_user.username media_type %}"
-            class="hidden">
-        {% csrf_token %}
-      </form>
+      <div x-data="mediaCsvExport()">
+        <button type="button"
+                @click="prepareCsvExport('{% url 'media_list_export_csv' target_user.username media_type %}')"
+                class="inline-flex items-center gap-2 px-4 py-2 mb-4 bg-[#39404b] rounded-md hover:bg-[#454d5a]">Export filtered CSV</button>
+        <div x-cloak
+             x-show="exportModalOpen"
+             @keydown.escape.window="closeExportModal()"
+             class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+             role="presentation">
+          <section class="w-full max-w-md rounded-lg border border-gray-700 bg-[#2a2f35] p-6 shadow-xl"
+                   role="dialog"
+                   aria-modal="true"
+                   aria-labelledby="media-csv-export-title">
+            <h2 id="media-csv-export-title" class="mb-2 text-xl font-semibold">CSV export ready</h2>
+            <p class="mb-5 text-sm text-gray-300" x-show="exportPreparing">Preparing your filtered CSV…</p>
+            <p class="mb-5 text-sm text-gray-300"
+               x-show="!exportPreparing && !exportError"
+               x-text="exportFilename ? `Ready to share ${exportFilename}` : 'Preparing your CSV…'"></p>
+            <p class="mb-5 text-sm text-red-300" x-show="exportError" x-text="exportError"></p>
+            <p class="mb-5 text-sm text-gray-300" x-show="exportStatus" x-text="exportStatus"></p>
+            <div class="flex flex-wrap justify-end gap-3">
+              <button type="button" @click="closeExportModal()" class="rounded-md px-4 py-2 text-sm text-gray-300 hover:bg-[#39404b]">Back to list</button>
+              <button type="button" x-show="!exportPreparing && canShareExport" @click="shareExport()" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Share CSV</button>
+              <button type="button" x-show="!exportPreparing && !canShareExport" @click="downloadExport()" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Download CSV</button>
+            </div>
+          </section>
+        </div>
+      </div>
     {% endif %}
 
     <!-- Form to manage state -->
@@ -365,29 +383,58 @@
 {% block js %}
   {{ block.super }}
   <script>
-    (() => {
-      const link = document.getElementById("filtered-csv-export");
-      const exportForm = document.getElementById("filtered-csv-export-form");
-      if (!link || !exportForm) return;
-
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        exportForm.querySelectorAll("[data-export-filter]").forEach((input) => input.remove());
-        ["filter-form", "taxonomy-filter-form", "credit-filter-form"].forEach((id) => {
-          const sourceForm = document.getElementById(id);
-          if (!sourceForm) return;
-          new FormData(sourceForm).forEach((value, name) => {
-            const input = document.createElement("input");
-            input.type = "hidden";
-            input.name = name;
-            input.value = value;
-            input.dataset.exportFilter = "";
-            exportForm.append(input);
+    function mediaCsvExport() {
+      return {
+        exportModalOpen: false, exportPreparing: false, exportFile: null,
+        exportFilename: '', exportUrl: '', exportError: '', exportStatus: '',
+        exportRequestId: 0, canShareExport: false,
+        async prepareCsvExport(url) {
+          const requestId = ++this.exportRequestId;
+          const params = new URLSearchParams();
+          ['filter-form', 'taxonomy-filter-form', 'credit-filter-form'].forEach((id) => {
+            const form = document.getElementById(id);
+            if (form) new FormData(form).forEach((value, key) => params.append(key, value));
           });
-        });
-        exportForm.requestSubmit();
-      });
-    })();
+          this.exportUrl = `${url}?${params.toString()}`;
+          this.exportModalOpen = true;
+          this.exportPreparing = true;
+          this.exportFile = null;
+          this.exportFilename = '';
+          this.exportError = '';
+          this.exportStatus = '';
+          this.canShareExport = false;
+          try {
+            const response = await fetch(this.exportUrl, { credentials: 'same-origin' });
+            if (!response.ok) throw new Error('CSV request failed');
+            const blob = await response.blob();
+            if (requestId !== this.exportRequestId) return;
+            const disposition = response.headers.get('Content-Disposition') || '';
+            this.exportFilename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'filtered-export.csv';
+            this.exportFile = new File([blob], this.exportFilename, { type: blob.type || 'text/csv' });
+            this.canShareExport = Boolean(navigator.share && navigator.canShare?.({ files: [this.exportFile] }));
+          } catch (error) {
+            if (requestId === this.exportRequestId) this.exportError = 'Could not prepare the CSV. You can still try a direct download.';
+          } finally {
+            if (requestId === this.exportRequestId) this.exportPreparing = false;
+          }
+        },
+        async shareExport() {
+          try { await navigator.share({ files: [this.exportFile], title: this.exportFilename }); }
+          catch (error) {
+            if (error.name === 'AbortError') this.exportStatus = 'Sharing was canceled. You can try again or go back to your list.';
+            else { this.canShareExport = false; this.exportError = 'Sharing did not complete. You can download the CSV instead.'; }
+          }
+        },
+        closeExportModal() { this.exportRequestId += 1; this.exportModalOpen = false; this.exportPreparing = false; },
+        downloadExport() {
+          if (!this.exportFile) { window.location.assign(this.exportUrl); return; }
+          const objectUrl = URL.createObjectURL(this.exportFile);
+          const link = document.createElement('a');
+          link.href = objectUrl; link.download = this.exportFilename; link.click();
+          window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        },
+      };
+    }
   </script>
   {% if has_credit_options %}
     <script>
