@@ -1033,6 +1033,38 @@ class ListItemToggleTests(TestCase):
 class ListCSVExportTests(TestCase):
     """Tests for the filtered custom-list CSV export."""
 
+    @patch("lists.views.refresh_tmdb_content_ratings_for_items.delay")
+    def test_export_queues_ratings_for_included_tmdb_items_missing_ratings(self, queue):
+        """Export queues rating hydration for included movies/TV not retrieved."""
+        user = get_user_model().objects.create_user(username="rating-exporter")
+        custom_list = CustomList.objects.create(name="Ratings", owner=user)
+        movie = Item.objects.create(
+            media_id="238",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.MOVIE.value,
+            title="Movie",
+        )
+        tv = Item.objects.create(
+            media_id="1399",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.TV.value,
+            title="TV",
+        )
+        game = Item.objects.create(
+            media_id="1942",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Game",
+        )
+        for item in (movie, tv, game):
+            CustomListItem.objects.create(custom_list=custom_list, item=item)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("list_export_csv", args=[custom_list.id]))
+
+        self.assertEqual(response.status_code, 200)
+        queue.assert_called_once_with([movie.pk, tv.pk])
+
     def test_export_uses_current_filters_and_cached_provider_metadata(self):
         """Export filtered rows with cached movie, TV, and game details."""
         user = get_user_model().objects.create_user(username="exporter")

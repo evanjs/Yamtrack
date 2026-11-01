@@ -17,6 +17,7 @@ from app.models import (
 from app.tasks import (
     backfill_tmdb_content_ratings,
     cleanup_expired_tmdb_content_ratings,
+    refresh_tmdb_content_ratings_for_items,
 )
 
 
@@ -84,6 +85,19 @@ class TMDBContentRatingTests(TestCase):
             self.tv_item.tmdb_content_rating_metadata.ratings["US"][0]["rating"],
             "TV-MA",
         )
+
+    @patch("app.tasks.tmdb.content_ratings", return_value={})
+    def test_requested_refresh_persists_successful_empty_and_skips_it_next_time(
+        self, fetch
+    ):
+        """A requested untracked item hydrates once, including empty ratings."""
+        first = refresh_tmdb_content_ratings_for_items([self.movie_item.pk])
+        second = refresh_tmdb_content_ratings_for_items([self.movie_item.pk])
+
+        self.assertEqual(first["succeeded"], 1)
+        self.assertEqual(second["processed"], 0)
+        fetch.assert_called_once_with(MediaTypes.MOVIE.value, "321")
+        self.assertEqual(self.movie_item.tmdb_content_rating_metadata.ratings, {})
 
     def test_movie_card_label_deduplicates_certifications_and_hides_unset(self):
         """Card labels deduplicate variants and stay hidden when unset."""

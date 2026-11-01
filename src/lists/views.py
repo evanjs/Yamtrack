@@ -7,6 +7,7 @@ from django.core.paginator import Paginator
 from django.db.models import Count, F, OuterRef, Q, Subquery
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.utils.text import slugify
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_GET, require_POST
@@ -19,10 +20,12 @@ from app.models import (
     MediaManager,
     MediaTypes,
     Sources,
+    TMDB_CONTENT_RATING_REFRESH_AFTER,
     TMDBMovieTaxonomy,
     TMDBMovieTaxonomyAssignment,
     tmdb_metadata_expiry_cutoff,
 )
+from app.tasks import refresh_tmdb_content_ratings_for_items
 from app.providers import services
 from lists.forms import CustomListForm
 from lists.models import CustomList, CustomListItem
@@ -430,6 +433,24 @@ def list_export_csv(request, list_id):
             items.values_list("id", flat=True),
             request.user,
         )
+
+    rating_refresh_cutoff = timezone.now() - TMDB_CONTENT_RATING_REFRESH_AFTER
+    rating_item_ids = list(
+        items.filter(
+            source=Sources.TMDB.value,
+            media_type__in=[MediaTypes.MOVIE.value, MediaTypes.TV.value],
+        )
+        .filter(
+            Q(tmdb_content_rating_metadata__isnull=True)
+            | Q(tmdb_content_rating_metadata__synced_at__isnull=True)
+            | Q(tmdb_content_rating_metadata__synced_at__lt=rating_refresh_cutoff),
+        )
+        .order_by()
+        .values_list("id", flat=True)
+        .distinct()
+    )
+    for offset in range(0, len(rating_item_ids), 100):
+        refresh_tmdb_content_ratings_for_items.delay(rating_item_ids[offset : offset + 100])
 
     output = HttpResponse(content_type="text/csv; charset=utf-8")
     filename = f"{slugify(custom_list.name) or list_id}-media.csv"

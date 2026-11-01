@@ -482,6 +482,40 @@ def refresh_due_tmdb_content_ratings(batch_size=100):
     return result
 
 
+@shared_task(name="Refresh requested TMDB content ratings")
+def refresh_tmdb_content_ratings_for_items(item_ids):
+    """Refresh requested TMDB movie/TV ratings without requiring tracking rows."""
+    if not item_ids:
+        return {"processed": 0, "succeeded": 0, "failed_ids": []}
+    now = timezone.now()
+    refresh_cutoff = now - TMDB_CONTENT_RATING_REFRESH_AFTER
+    retry_cutoff = now - TMDB_CONTENT_RATING_RETRY_AFTER
+    due = (
+        Q(tmdb_content_rating_metadata__isnull=True)
+        | Q(tmdb_content_rating_metadata__synced_at__isnull=True)
+        | Q(tmdb_content_rating_metadata__synced_at__lt=refresh_cutoff)
+    )
+    retry_allowed = (
+        Q(tmdb_content_rating_metadata__last_attempted_at__isnull=True)
+        | Q(tmdb_content_rating_metadata__last_attempted_at__lt=retry_cutoff)
+        | Q(
+            tmdb_content_rating_metadata__synced_at__gte=F(
+                "tmdb_content_rating_metadata__last_attempted_at",
+            ),
+        )
+    )
+    items = list(
+        Item.objects.filter(
+            pk__in=item_ids,
+            source=Sources.TMDB.value,
+            media_type__in=[MediaTypes.MOVIE.value, MediaTypes.TV.value],
+        )
+        .filter(due, retry_allowed)
+        .distinct()
+    )
+    return refresh_tmdb_content_rating_items(items)
+
+
 @shared_task(name="Cleanup expired TMDB content ratings")
 def cleanup_expired_tmdb_content_ratings():
     """Delete durable TMDB rating rows past the conservative retention limit."""
