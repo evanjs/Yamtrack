@@ -383,12 +383,62 @@ class MediaListViewTests(TestCase):
         self.assertTrue(response.context["has_taxonomy_options"])
         self.assertContains(response, "TMDB facets")
         self.assertContains(response, 'name="keyword_exclude"')
+        self.assertContains(response, 'hx-trigger="toggle once"')
+        self.assertNotContains(response, "mystery")
+        self.assertContains(response, 'value="13"')
         self.assertEqual(response.context["media_list"].paginator.count, 1)
         self.assertEqual(response.context["media_list"][0].item, movie_items[0])
         self.assertEqual(
             response.context["current_taxonomy_filters"]["genre"],
             {"include": [27, 53], "exclude": []},
         )
+
+    def test_movie_taxonomy_options_load_on_demand(self):
+        """TMDB facet options are returned only by the lazy options endpoint."""
+        item = Item.objects.create(
+            media_id="taxonomy-lazy",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.MOVIE.value,
+            title="Lazy Taxonomy Movie",
+            image="https://example.com/poster.jpg",
+        )
+        Movie.objects.bulk_create(
+            [Movie(item=item, user=self.user, status=Status.COMPLETED)],
+        )
+        store_tmdb_movie_taxonomies(
+            item,
+            {
+                "genres": [{"id": 27, "name": "Horror"}],
+                "keywords": [{"id": 12, "name": "ghost"}],
+            },
+        )
+
+        response = self.client.get(
+            reverse(
+                "taxonomy_filter_options",
+                args=[self.user.username, MediaTypes.MOVIE.value],
+            )
+            + "?genre=27&keyword_exclude=12",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "app/components/taxonomy_filter_options.html")
+        self.assertContains(response, "Horror")
+        self.assertContains(response, "ghost")
+        self.assertContains(response, 'name="genre"')
+        self.assertContains(response, 'name="keyword_exclude"')
+        self.assertContains(response, "state: 'exclude'")
+
+    def test_private_movie_taxonomy_options_are_hidden(self):
+        """The deferred taxonomy endpoint keeps private lists inaccessible."""
+        response = self.client.get(
+            reverse(
+                "taxonomy_filter_options",
+                args=[self.external_user.username, MediaTypes.MOVIE.value],
+            ),
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_media_list_htmx_request(self):
         """Test the media list view with HTMX request."""

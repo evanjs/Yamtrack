@@ -64,7 +64,13 @@
       </div>
 
       {% if has_taxonomy_options %}
-        <details class="relative">
+        <details class="relative"
+                 {% if media_type == MediaTypes.MOVIE.value %}hx-get="{% url 'taxonomy_filter_options' target_user.username media_type %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"
+                 hx-trigger="toggle once"
+                 hx-target="#taxonomy-filter-options"
+                 hx-swap="innerHTML"
+                 hx-include="#taxonomy-filter-form"
+                 hx-indicator="#taxonomy-filter-loading"{% endif %}>
           <summary class="flex items-center px-4 py-2 bg-[#39404b] rounded-md hover:bg-[#454d5a] transition-colors cursor-pointer list-none">
             {{ taxonomy_label }} facets
           </summary>
@@ -76,63 +82,17 @@
                 {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
                 hx-include="#filter-form,#credit-filter-form"
                 hx-indicator="#loading-indicator">
-            <div role="tablist" aria-label="{{ taxonomy_label }} facet types" class="flex gap-1 border-b border-gray-600">
-              {% for facet, options in taxonomy_options.items %}
-                <button type="button"
-                        role="tab"
-                        id="taxonomy-tab-{{ facet }}"
-                        aria-controls="taxonomy-panel-{{ facet }}"
-                        :aria-selected="activeFacet === '{{ facet }}'"
-                        :tabindex="activeFacet === '{{ facet }}' ? 0 : -1"
-                        @click="activeFacet = '{{ facet }}'"
-                        @keydown.right.prevent="$el.parentElement.querySelectorAll('[role=tab]')[(Array.from($el.parentElement.querySelectorAll('[role=tab]')).indexOf($el) + 1) % {{ taxonomy_options|length }}].focus()"
-                        @keydown.left.prevent="$el.parentElement.querySelectorAll('[role=tab]')[(Array.from($el.parentElement.querySelectorAll('[role=tab]')).indexOf($el) + {{ taxonomy_options|length }} - 1) % {{ taxonomy_options|length }}].focus()"
-                        class="px-2 py-2 text-sm font-medium border-b-2"
-                        :class="activeFacet === '{{ facet }}' ? 'border-indigo-400 text-white' : 'border-transparent text-gray-400 hover:text-white'">
-                  {{ facet|title }}
-                  <span class="ml-1 text-xs text-indigo-200" x-text="selectedCounts['{{ facet }}']"></span>
-                </button>
-              {% endfor %}
+            <div id="taxonomy-filter-options">
+              {% if media_type == MediaTypes.MOVIE.value %}
+                {% for facet, selections in current_taxonomy_filters.items %}
+                  {% for provider_id in selections.include %}<input type="hidden" name="{{ facet }}" value="{{ provider_id }}">{% endfor %}
+                  {% for provider_id in selections.exclude %}<input type="hidden" name="{{ facet }}_exclude" value="{{ provider_id }}">{% endfor %}
+                {% endfor %}
+                <p id="taxonomy-filter-loading" class="htmx-indicator text-sm text-gray-300">Loading movie facets…</p>
+              {% else %}
+                {% include "app/components/taxonomy_filter_options.html" %}
+              {% endif %}
             </div>
-            {% for facet, options in taxonomy_options.items %}
-              <fieldset role="tabpanel"
-                        id="taxonomy-panel-{{ facet }}"
-                        aria-labelledby="taxonomy-tab-{{ facet }}"
-                        x-show="activeFacet === '{{ facet }}'"
-                        x-data="{ needle: '' }"
-                        class="pt-3">
-                <p class="text-xs text-gray-400 mb-2">Click a value to include (+), exclude (−), or ignore (·).</p>
-                <input type="search"
-                       x-model="needle"
-                       placeholder="Find {{ facet }}..."
-                       aria-label="Find {{ facet }}"
-                       class="w-full mb-2 px-2 py-1 rounded bg-[#2a2f35] text-white text-sm">
-                <div class="max-h-80 overflow-y-auto space-y-1">
-                  {% for option in options %}
-                    <div x-show="!needle || '{{ option.name|escapejs }}'.toLowerCase().includes(needle.toLowerCase())"
-                         class="flex items-start gap-2 text-sm text-gray-200">
-                      <span x-data="{ state: '{{ option.state }}' }" class="flex items-center gap-2">
-                        <input type="hidden"
-                               name="{{ facet }}"
-                               value="{{ option.provider_id }}"
-                               :disabled="state !== 'include'">
-                        <input type="hidden"
-                               name="{{ facet }}_exclude"
-                               value="{{ option.provider_id }}"
-                               :disabled="state !== 'exclude'">
-                        <button type="button"
-                                class="w-6 h-6 rounded border text-xs font-bold"
-                                :class="state === 'include' ? 'bg-indigo-600 border-indigo-400 text-white' : state === 'exclude' ? 'bg-red-900 border-red-400 text-white' : 'bg-[#2a2f35] border-gray-600 text-gray-400'"
-                                :aria-label="'{{ option.name|escapejs }}: ' + state + '. Click to change filter state.'"
-                                @click="const wasActive = state !== 'neutral'; state = state === 'neutral' ? 'include' : state === 'include' ? 'exclude' : 'neutral'; selectedCounts['{{ facet }}'] += (state !== 'neutral' ? 1 : 0) - (wasActive ? 1 : 0); $nextTick(() => $dispatch('change'))"
-                                x-text="state === 'include' ? '+' : state === 'exclude' ? '−' : '·'"></button>
-                      </span>
-                      <span>{{ option.name }}</span>
-                    </div>
-                  {% endfor %}
-                </div>
-              </fieldset>
-            {% endfor %}
           </form>
         </details>
       {% endif %}

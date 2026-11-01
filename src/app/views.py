@@ -767,27 +767,86 @@ def progress_edit(request, media_type, instance_id):
     )
 
 
-def get_media_taxonomy_filter_context(target_user, media_type, query_params):
+def get_media_taxonomy_filter_context(
+    target_user,
+    media_type,
+    query_params,
+    *,
+    include_options=True,
+):
     """Return taxonomy labels, filters, and options for one supported media type."""
     if media_type == MediaTypes.GAME.value:
         current_filters, active_filters = get_igdb_game_taxonomy_filters(query_params)
-        options = get_igdb_game_taxonomy_options(
-            target_user,
-            media_type,
-            current_filters,
+        options = (
+            get_igdb_game_taxonomy_options(
+                target_user,
+                media_type,
+                current_filters,
+            )
+            if include_options
+            else {}
         )
         return "IGDB", current_filters, active_filters, options
 
     if media_type == MediaTypes.MOVIE.value:
         current_filters, active_filters = get_tmdb_movie_taxonomy_filters(query_params)
-        options = get_tmdb_movie_taxonomy_options(
-            target_user,
-            media_type,
-            current_filters,
+        options = (
+            get_tmdb_movie_taxonomy_options(
+                target_user,
+                media_type,
+                current_filters,
+            )
+            if include_options
+            else {}
         )
         return "TMDB", current_filters, active_filters, options
 
     return "", {}, {}, {}
+
+
+def has_tmdb_movie_taxonomy_options(user):
+    """Check cheaply whether a movie library has any fresh taxonomy values."""
+    return TMDBMovieTaxonomy.objects.filter(
+        movie_assignments__metadata__item__source=Sources.TMDB.value,
+        movie_assignments__metadata__item__movie__user=user,
+        movie_assignments__metadata__synced_at__gte=tmdb_metadata_expiry_cutoff(),
+    ).exists()
+
+
+@login_not_required
+@require_GET
+def media_taxonomy_filter_options(request, username, media_type):
+    """Render movie taxonomy options separately from the initial list page."""
+    target_user = get_object_or_404(User, username=username)
+    if media_type != MediaTypes.MOVIE.value:
+        raise Http404
+    if request.user != target_user:
+        if target_user.profile_private:
+            raise Http404
+        enabled_media_types = target_user.get_enabled_media_types()
+        if media_type not in enabled_media_types:
+            raise Http404
+
+    taxonomy_label, current_filters, _active_filters, taxonomy_options = (
+        get_media_taxonomy_filter_context(
+            target_user,
+            media_type,
+            request.GET,
+        )
+    )
+    taxonomy_selected_counts = {
+        facet: len(selections["include"]) + len(selections["exclude"])
+        for facet, selections in current_filters.items()
+    }
+    return render(
+        request,
+        "app/components/taxonomy_filter_options.html",
+        {
+            "taxonomy_label": taxonomy_label,
+            "taxonomy_options": taxonomy_options,
+            "taxonomy_selected_counts": taxonomy_selected_counts,
+        },
+    )
 
 
 @login_not_required
@@ -848,7 +907,17 @@ def media_list(request, username, media_type):
         current_taxonomy_filters,
         active_taxonomy_filters,
         taxonomy_options,
-    ) = get_media_taxonomy_filter_context(target_user, media_type, request.GET)
+    ) = get_media_taxonomy_filter_context(
+        target_user,
+        media_type,
+        request.GET,
+        include_options=media_type != MediaTypes.MOVIE.value,
+    )
+    has_taxonomy_options = (
+        has_tmdb_movie_taxonomy_options(target_user)
+        if media_type == MediaTypes.MOVIE.value
+        else any(taxonomy_options.values())
+    )
     credit_filters, credit_match, credit_roles = get_tmdb_movie_credit_filter_context(
         target_user,
         media_type,
@@ -911,7 +980,7 @@ def media_list(request, username, media_type):
         "status_choices": MediaStatusChoices.choices,
         "target_user": target_user,
         "taxonomy_options": taxonomy_options,
-        "has_taxonomy_options": any(taxonomy_options.values()),
+        "has_taxonomy_options": has_taxonomy_options,
         "taxonomy_label": taxonomy_label,
         "current_taxonomy_filters": current_taxonomy_filters,
         "taxonomy_selected_counts": taxonomy_selected_counts,
@@ -957,7 +1026,10 @@ def media_list_export_csv(request, username, media_type):
         f"{media_type}_status", filters.get("status")
     ) or "all"
     _label, _current, taxonomy_filters, _options = get_media_taxonomy_filter_context(
-        request.user, media_type, filters
+        request.user,
+        media_type,
+        filters,
+        include_options=False,
     )
     credit_filters, credit_match, _roles = get_tmdb_movie_credit_filter_context(
         request.user, media_type, filters

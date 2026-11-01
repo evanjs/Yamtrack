@@ -30,6 +30,11 @@ urlpatterns = [
         views.media_list_export_csv,
         name="media_list_export_csv",
     ),
+    path(
+        "<str:username>/<media_type:media_type>/taxonomy-options",
+        views.media_taxonomy_filter_options,
+        name="taxonomy_filter_options",
+    ),
     path("<str:username>/<media_type:media_type>", views.media_list, name="medialist"),
     path(
         "details/<source:source>/<media_type:media_type>/<str:media_id>/<str:title>",
