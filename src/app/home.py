@@ -1,6 +1,7 @@
 from django.utils.text import slugify
 
 from app.models import BasicMedia, Status
+from users.models import HomeSortChoices
 
 
 def build_home_section(key, media_types):
@@ -31,15 +32,25 @@ def get_home_media_types(
     hide_unreleased=False,
 ):
     """Return media types for a home section, or one type's load-more page."""
+    filter_in_sql = (
+        hide_unreleased
+        and section_key == Status.PLANNING.value
+        and sort_by == HomeSortChoices.UPCOMING
+        and items_limit is not None
+    )
     media_types = BasicMedia.objects.get_home_status(
         user=request.user,
         status=section_key,
         sort_by=sort_by,
-        items_limit=None if hide_unreleased else items_limit,
+        items_limit=None if hide_unreleased and not filter_in_sql else items_limit,
         specific_media_type=specific_media_type,
+        hide_unreleased=hide_unreleased,
     )
 
     if not hide_unreleased:
+        return media_types
+
+    if filter_in_sql:
         return media_types
 
     return _paginate_home_media_types(

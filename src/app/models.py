@@ -35,6 +35,7 @@ import app
 import events
 import users
 from app import providers
+from app.home_performance import profile_home_queries
 from app.mixins import CalendarTriggerMixin
 
 logger = logging.getLogger(__name__)
@@ -881,27 +882,86 @@ class MediaManager(models.Manager):
         sort_by,
         items_limit=None,
         specific_media_type=None,
+        *,
+        hide_unreleased=False,
     ):
         """Get a home media list for a specific status grouped by media type."""
         list_by_type = {}
         media_types = self._get_media_types_to_process(user, specific_media_type)
 
         for media_type in media_types:
-            # Get base media list for the requested status
-            media_list = self.get_media_list(
-                user=user,
-                media_type=media_type,
-                status_filter=status,
-                sort_filter=None,
+            with profile_home_queries(
+                status,
+                media_type,
+                sort_by=sort_by,
+                items_limit=items_limit,
+                hide_unreleased=hide_unreleased,
+            ):
+                media_list = self._get_home_status_for_media_type(
+                    user=user,
+                    status=status,
+                    sort_by=sort_by,
+                    items_limit=items_limit,
+                    specific_media_type=specific_media_type,
+                    media_type=media_type,
+                    hide_unreleased=hide_unreleased,
+                )
+            if media_list is not None:
+                list_by_type[media_type] = media_list
+
+        return list_by_type
+
+    def _get_home_status_for_media_type(
+        self,
+        *,
+        user,
+        status,
+        sort_by,
+        items_limit,
+        specific_media_type,
+        media_type,
+        hide_unreleased,
+    ):
+        """Get and paginate one media type for a home status section."""
+        media_list = self.get_media_list(
+            user=user,
+            media_type=media_type,
+            status_filter=status,
+            sort_filter=None,
+        )
+
+        database_ordered = (
+            sort_by == users.models.HomeSortChoices.UPCOMING and items_limit is not None
+        )
+        home_sort_time = timezone.now() if database_ordered else None
+        if database_ordered:
+            media_list = self._order_home_media_queryset(
+                media_list,
+                media_type,
+                home_sort_time,
+                exclude_upcoming=(hide_unreleased and status == Status.PLANNING.value),
             )
-
+            total_count = media_list.count()
+            if not total_count:
+                return None
+            media_list = (
+                media_list[items_limit:]
+                if specific_media_type
+                else media_list[:items_limit]
+            )
+            media_list = list(media_list)
             if not media_list:
-                continue
+                return {"items": [], "total": total_count}
+        elif not media_list:
+            return None
 
-            # Annotate with max_progress and next_event
-            self.annotate_max_progress(media_list, media_type)
-            self._annotate_next_event(media_list)
+        # Annotate with max_progress and next_event
+        self.annotate_max_progress(media_list, media_type)
+        self._annotate_next_event(media_list, home_sort_time)
 
+        if database_ordered:
+            paginated_list = media_list
+        else:
             # Sort the media list
             sorted_list = self._sort_home_media(media_list, sort_by)
 
@@ -914,12 +974,67 @@ class MediaManager(models.Manager):
             else:
                 paginated_list = sorted_list[:items_limit]
 
-            list_by_type[media_type] = {
-                "items": paginated_list,
-                "total": total_count,
-            }
+        return {
+            "items": paginated_list,
+            "total": total_count,
+        }
 
-        return list_by_type
+    def _order_home_media_queryset(
+        self,
+        queryset,
+        media_type,
+        current_time,
+        *,
+        exclude_upcoming=False,
+    ):
+        """Sort upcoming media in the database before loading result objects."""
+        next_event = (
+            events.models.Event.objects.filter(
+                item_id=OuterRef("item_id"),
+                datetime__gt=current_time,
+            )
+            .order_by("datetime")
+            .values("datetime")[:1]
+        )
+        if media_type == MediaTypes.SEASON.value:
+            latest_progress = (
+                Episode.objects.filter(
+                    related_season_id=OuterRef("pk"),
+                    end_date__isnull=False,
+                )
+                .order_by("-end_date")
+                .values("end_date")[:1]
+            )
+            recent_activity = models.functions.Coalesce(
+                models.Subquery(latest_progress),
+                "created_at",
+            )
+        else:
+            recent_activity = models.functions.Coalesce(
+                "progressed_at",
+                "created_at",
+            )
+
+        queryset = queryset.annotate(
+            home_next_event_datetime=models.Subquery(next_event),
+        )
+        if exclude_upcoming:
+            queryset = queryset.filter(
+                Q(home_next_event_datetime__isnull=True)
+                | Q(
+                    home_next_event_datetime=(
+                        events.models.SentinelDatetime.max_datetime()
+                    ),
+                ),
+            )
+
+        return queryset.order_by(
+            models.F("home_next_event_datetime").asc(nulls_last=True),
+            recent_activity.desc(),
+            models.functions.Lower("item__title"),
+            "item_id",
+            "pk",
+        )
 
     def _get_media_types_to_process(self, user, specific_media_type):
         """Determine which media types to process based on user settings."""
@@ -933,9 +1048,9 @@ class MediaManager(models.Manager):
             if media_type != MediaTypes.TV.value
         ]
 
-    def _annotate_next_event(self, media_list):
+    def _annotate_next_event(self, media_list, current_time=None):
         """Annotate next_event for media items."""
-        current_time = timezone.now()
+        current_time = current_time or timezone.now()
 
         for media in media_list:
             # Get future events sorted by datetime

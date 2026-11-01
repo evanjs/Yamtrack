@@ -81,6 +81,11 @@ SECRET_KEY = config(
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=False, cast=bool)
+HOME_PERFORMANCE_PROFILE = config(
+    "HOME_PERFORMANCE_PROFILE",
+    default=False,
+    cast=bool,
+)
 
 INTERNAL_IPS = ["127.0.0.1"]
 

@@ -3,8 +3,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.db.models import Prefetch
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from app.models import (
@@ -22,7 +24,7 @@ from app.models import (
     Sources,
     Status,
 )
-from events.models import Event
+from events.models import Event, SentinelDatetime
 from users.models import HomeSortChoices, MediaStatusChoices
 
 mock_path = Path(__file__).resolve().parent.parent / "mock_data"
@@ -681,6 +683,155 @@ class MediaManagerTests(TestCase):
             ],
             ["Foundation", "Hyperion"],
         )
+
+    def test_upcoming_home_status_limits_rows_in_database(self):
+        """Upcoming home results are sorted and limited before model loading."""
+        for days in range(1, 17):
+            item = Item.objects.create(
+                media_id=f"upcoming-{days}",
+                source=Sources.TMDB.value,
+                media_type=MediaTypes.MOVIE.value,
+                title=f"Planned Movie {days:02d}",
+                image="http://example.com/movie.jpg",
+            )
+            Movie.objects.create(
+                item=item,
+                user=self.user,
+                status=Status.PLANNING.value,
+            )
+            Event.objects.create(
+                item=item,
+                datetime=timezone.now() + timedelta(days=days),
+            )
+
+        with CaptureQueriesContext(connection) as captured_queries:
+            result = MediaManager().get_home_status(
+                user=self.user,
+                status=Status.PLANNING.value,
+                sort_by=HomeSortChoices.UPCOMING,
+                items_limit=14,
+            )[MediaTypes.MOVIE.value]
+
+        self.assertEqual(result["total"], 16)
+        self.assertEqual(
+            [media.item.title for media in result["items"]],
+            [f"Planned Movie {days:02d}" for days in range(1, 15)],
+        )
+        self.assertTrue(
+            any(
+                Movie._meta.db_table in query["sql"]
+                and "LIMIT 14" in query["sql"].upper()
+                for query in captured_queries.captured_queries
+            ),
+        )
+
+    def test_hide_unreleased_planning_is_filtered_before_database_limit(self):
+        """Hidden unreleased planning rows are excluded before SQL pagination."""
+        created_at = timezone.now()
+        page_size = 14
+        retained_sentinel_count = 16
+        excluded_future_count = 2
+        for index in range(1, retained_sentinel_count + excluded_future_count + 1):
+            item = Item.objects.create(
+                media_id=f"planning-filter-{index}",
+                source=Sources.TMDB.value,
+                media_type=MediaTypes.MOVIE.value,
+                title=f"Planning Movie {index:02d}",
+                image="http://example.com/movie.jpg",
+            )
+            movie = Movie.objects.create(
+                item=item,
+                user=self.user,
+                status=Status.PLANNING.value,
+            )
+            Event.objects.create(
+                item=item,
+                datetime=(
+                    SentinelDatetime.max_datetime()
+                    if index <= retained_sentinel_count
+                    else timezone.now() + timedelta(days=index)
+                ),
+            )
+            activity_time = created_at + timedelta(days=index)
+            Movie.objects.filter(pk=movie.pk).update(
+                created_at=activity_time,
+                progressed_at=activity_time,
+            )
+
+        with CaptureQueriesContext(connection) as captured_queries:
+            result = MediaManager().get_home_status(
+                user=self.user,
+                status=Status.PLANNING.value,
+                sort_by=HomeSortChoices.UPCOMING,
+                items_limit=page_size,
+                hide_unreleased=True,
+            )[MediaTypes.MOVIE.value]
+
+        self.assertEqual(result["total"], retained_sentinel_count)
+        self.assertEqual(
+            [media.item.title for media in result["items"]],
+            [
+                f"Planning Movie {index:02d}"
+                for index in range(
+                    retained_sentinel_count,
+                    retained_sentinel_count - page_size,
+                    -1,
+                )
+            ],
+        )
+        self.assertTrue(
+            any(
+                Movie._meta.db_table in query["sql"]
+                and f"LIMIT {page_size}" in query["sql"].upper()
+                for query in captured_queries.captured_queries
+            ),
+        )
+
+    @override_settings(HOME_PERFORMANCE_PROFILE=True)
+    def test_home_query_profiler_logs_type_timing_and_plan(self):
+        """Opt-in profiling logs per-type query timing and a safe plan summary."""
+        for media_type in MediaTypes.values:
+            setattr(
+                self.user,
+                f"{media_type.lower()}_enabled",
+                media_type == MediaTypes.MOVIE.value,
+            )
+        self.user.save()
+
+        item = Item.objects.create(
+            media_id="profile-movie",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.MOVIE.value,
+            title="Profile Movie",
+            image="http://example.com/movie.jpg",
+        )
+        Movie.objects.create(
+            item=item,
+            user=self.user,
+            status=Status.PLANNING.value,
+        )
+
+        with self.assertLogs("app.home_performance", level="INFO") as captured:
+            MediaManager().get_home_status(
+                user=self.user,
+                status=Status.PLANNING.value,
+                sort_by=HomeSortChoices.UPCOMING,
+                items_limit=14,
+            )
+
+        output = "\n".join(captured.output)
+        self.assertIn("status=Planning", output)
+        self.assertIn("media_type=movie", output)
+        self.assertIn("sort_by=upcoming", output)
+        self.assertIn("items_limit=14", output)
+        self.assertIn("hide_unreleased=False", output)
+        self.assertIn("db_limited=True", output)
+        self.assertIn("query_count=", output)
+        self.assertIn("slowest_sql=", output)
+        self.assertIn("plan=", output)
+        self.assertNotIn("plan=unavailable", output)
+        self.assertNotIn("plan=none", output)
+        self.assertNotIn("params=", output)
 
     def test_annotate_next_event(self):
         """Test the _annotate_next_event method."""

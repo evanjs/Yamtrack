@@ -40,6 +40,7 @@ See [media-imports](media-imports.md).
 | `CSRF`             | Comma-separated list of trusted origins for `POST` requests when using reverse proxies (e.g., `https://yamtrack.mydomain.com`).                                                                      |
 | `REGISTRATION`     | Default to `True`. Set to `False` to disable user registration.                                                                                                                                      |
 | `DEBUG`            | Default to `False`. Set to `True` for debugging.                                                                                                                                                     |
+| `HOME_PERFORMANCE_PROFILE` | Default to `False`. Temporarily set to `True` to log home-page timings and a parameter-free query-plan summary for each status/media type. Disable after profiling. |
 | `ADMIN_ENABLED`    | Default to `False`. Set to `True` to enable the Django admin interface.                                                                                                                              |
 | `TRACK_TIME`       | Default to `True`. Set to `False` to disable time tracking in Yamtrack.                                                                                                                              |
 
