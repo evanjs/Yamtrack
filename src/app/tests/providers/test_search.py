@@ -396,3 +396,24 @@ class SearchShowAdultTitles(TestCase):
         self.assertFalse(variables["isAdult"])
 
         self.assert_separate_cache_keys(mock_cache)
+
+    @patch("app.providers.anilist.cache")
+    @patch("app.providers.anilist.services.api_request")
+    def test_anilist_cache_separates_instance_adult_flags(
+        self,
+        mock_api_request,
+        mock_cache,
+    ):
+        """Changing AniList NSFW config cannot reuse a stale search cache."""
+        mock_cache.get.return_value = None
+        mock_api_request.return_value = {
+            "data": {"Page": {"pageInfo": {"hasNextPage": False}, "media": []}},
+        }
+
+        with override_settings(ANILIST_NSFW=False):
+            anilist.search(MediaTypes.MANGA.value, "Gal-sen", 1, show_adult_titles=True)
+        with override_settings(ANILIST_NSFW=True):
+            anilist.search(MediaTypes.MANGA.value, "Gal-sen", 1, show_adult_titles=True)
+
+        keys = [call.args[0] for call in mock_cache.get.call_args_list]
+        self.assertNotEqual(keys[0], keys[1])

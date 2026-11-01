@@ -135,6 +135,9 @@ def get_metadata_sync_cache_key(source, media_type, media_id, season_number):
         "_v3"
         if source == Sources.TMDB.value
         and media_type in {MediaTypes.MOVIE.value, MediaTypes.TV.value}
+        else "_v2"
+        if source == Sources.MAL.value
+        and media_type in {MediaTypes.ANIME.value, MediaTypes.MANGA.value}
         else ""
     )
     cache_key = f"{source}_{media_type}{version}_{media_id}"

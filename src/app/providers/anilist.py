@@ -20,6 +20,7 @@ base_url = "https://graphql.anilist.co"
 media_card_fragment = """
 fragment MediaCard on Media {
     id
+    idMal
     type
     title {
         userPreferred
@@ -155,7 +156,7 @@ def search(media_type, query, page, *, show_adult_titles=True):
     """Search for anime or manga on AniList."""
     cache_key = (
         f"search_{Sources.ANILIST.value}_{media_type}_{query}_{page}"
-        f"_{show_adult_titles}"
+        f"_{show_adult_titles}_{settings.ANILIST_NSFW}"
     )
     data = cache.get(cache_key)
 
@@ -431,6 +432,48 @@ def get_related(response, media_type):
         get_media_card(edge["node"], media_type)
         for edge in response["relations"]["edges"]
         if edge["node"]["type"] == media_type.upper()
+    ]
+
+
+def get_recommendations_by_mal_id(media_id, media_type):
+    """Return AniList recommendations for a MyAnimeList media ID."""
+    query = (
+        """
+query ($idMal: Int, $type: MediaType) {
+    Media(idMal: $idMal, type: $type) {
+        recommendations(sort: RATING_DESC) {
+            nodes {
+                mediaRecommendation {
+                    ...MediaCard
+                }
+            }
+        }
+    }
+}
+"""
+        + media_card_fragment
+    )
+    response = graphql_request(
+        query,
+        {"idMal": int(media_id), "type": media_type.upper()},
+    )["Media"]
+    if not response:
+        return []
+
+    return [
+        {
+            **get_media_card(node["mediaRecommendation"], media_type),
+            **(
+                {
+                    "media_id": node["mediaRecommendation"]["idMal"],
+                    "source": Sources.MAL.value,
+                }
+                if node["mediaRecommendation"].get("idMal")
+                else {}
+            ),
+        }
+        for node in response["recommendations"]["nodes"]
+        if node["mediaRecommendation"]
     ]
 
 

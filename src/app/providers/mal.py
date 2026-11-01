@@ -8,7 +8,7 @@ from django.core.cache import cache
 
 from app import helpers
 from app.models import MediaTypes, Sources
-from app.providers import services
+from app.providers import anilist, services
 
 logger = logging.getLogger(__name__)
 base_url = "https://api.myanimelist.net/v2"
@@ -95,7 +95,7 @@ def search(media_type, query, page, *, show_adult_titles=True):
 
 def anime(media_id):
     """Return the metadata for the selected anime or manga from MyAnimeList."""
-    cache_key = f"{Sources.MAL.value}_{MediaTypes.ANIME.value}_{media_id}"
+    cache_key = f"{Sources.MAL.value}_{MediaTypes.ANIME.value}_v2_{media_id}"
     data = cache.get(cache_key)
 
     if data is None:
@@ -116,6 +116,22 @@ def anime(media_id):
             handle_error(error)
 
         num_episodes = get_number_of_episodes(response)
+        recommendations = get_related(
+            response.get("recommendations"),
+            MediaTypes.ANIME.value,
+        )
+        if not recommendations:
+            try:
+                recommendations = anilist.get_recommendations_by_mal_id(
+                    media_id,
+                    MediaTypes.ANIME.value,
+                )
+            except (requests.RequestException, services.ProviderAPIError):
+                logger.warning(
+                    "Failed to fetch AniList recommendations for MAL anime %s",
+                    media_id,
+                    exc_info=True,
+                )
 
         data = {
             "media_id": media_id,
@@ -146,10 +162,7 @@ def anime(media_id):
                     response.get("related_anime"),
                     MediaTypes.ANIME.value,
                 ),
-                "recommendations": get_related(
-                    response.get("recommendations"),
-                    MediaTypes.ANIME.value,
-                ),
+                "recommendations": recommendations,
             },
         }
 
@@ -160,7 +173,7 @@ def anime(media_id):
 
 def manga(media_id):
     """Return the metadata for the selected anime or manga from MyAnimeList."""
-    cache_key = f"{Sources.MAL.value}_{MediaTypes.MANGA.value}_{media_id}"
+    cache_key = f"{Sources.MAL.value}_{MediaTypes.MANGA.value}_v2_{media_id}"
     data = cache.get(cache_key)
 
     if data is None:
@@ -181,6 +194,22 @@ def manga(media_id):
             handle_error(error)
 
         num_chapters = get_number_of_episodes(response)
+        recommendations = get_related(
+            response.get("recommendations"),
+            MediaTypes.MANGA.value,
+        )
+        if not recommendations:
+            try:
+                recommendations = anilist.get_recommendations_by_mal_id(
+                    media_id,
+                    MediaTypes.MANGA.value,
+                )
+            except (requests.RequestException, services.ProviderAPIError):
+                logger.warning(
+                    "Failed to fetch AniList recommendations for MAL manga %s",
+                    media_id,
+                    exc_info=True,
+                )
 
         data = {
             "media_id": media_id,
@@ -206,10 +235,7 @@ def manga(media_id):
                     response.get("related_manga"),
                     MediaTypes.MANGA.value,
                 ),
-                "recommendations": get_related(
-                    response.get("recommendations"),
-                    MediaTypes.MANGA.value,
-                ),
+                "recommendations": recommendations,
             },
         }
 

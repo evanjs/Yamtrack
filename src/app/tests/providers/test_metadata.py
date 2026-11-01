@@ -115,8 +115,9 @@ class Metadata(TestCase):
         self.assertEqual(response["details"]["status"], "Finished")
         self.assertEqual(response["details"]["episodes"], 26)
 
+    @patch("app.providers.mal.anilist.get_recommendations_by_mal_id", return_value=[])
     @patch("requests.Session.get")
-    def test_anime_unknown(self, mock_data):
+    def test_anime_unknown(self, mock_data, _mock_recommendations):
         """Test the metadata method for anime with mostly unknown data."""
         with Path(mock_path / "metadata_anime_unknown.json").open() as file:
             anime_response = json.load(file)
@@ -139,12 +140,114 @@ class Metadata(TestCase):
         self.assertEqual(response["details"]["status"], "Finished")
         self.assertEqual(response["details"]["number_of_chapters"], 162)
 
+    @patch("app.providers.mal.anilist.get_recommendations_by_mal_id")
+    @patch("app.providers.mal.services.api_request")
+    def test_mal_manga_uses_anilist_recommendations_when_mal_has_none(
+        self,
+        mock_api_request,
+        mock_anilist_recommendations,
+    ):
+        """Use AniList fallback recommendations for a MAL manga page."""
+        manga_response = {
+            "title": "Gal Sen",
+            "media_type": "manga",
+            "synopsis": "",
+            "status": "finished",
+            "num_chapters": 0,
+            "recommendations": [],
+            "related_manga": [],
+        }
+        mock_api_request.return_value = manga_response
+        mock_anilist_recommendations.return_value = [
+            {
+                "media_id": 6789,
+                "source": Sources.MAL.value,
+                "media_type": MediaTypes.MANGA.value,
+                "title": "Suggested manga",
+                "image": "cover.jpg",
+            }
+        ]
+
+        response = mal.manga("140486")
+
+        self.assertEqual(
+            response["related"]["recommendations"],
+            mock_anilist_recommendations.return_value,
+        )
+        mock_anilist_recommendations.assert_called_once_with(
+            "140486",
+            MediaTypes.MANGA.value,
+        )
+
     def test_mangaupdates(self):
         """Test the metadata method for manga from mangaupdates."""
         response = mangaupdates.manga("72274276213")
         self.assertEqual(response["title"], "Monster")
         self.assertEqual(response["details"]["year"], "1994")
         self.assertEqual(response["details"]["format"], "Manga")
+
+    @patch("app.providers.anilist.graphql_request")
+    def test_anilist_recommendations_by_mal_id_use_mal_links_when_available(
+        self,
+        mock_graphql_request,
+    ):
+        """Link AniList recommendations to MAL detail pages when possible."""
+        mock_graphql_request.return_value = {
+            "Media": {
+                "recommendations": {
+                    "nodes": [
+                        {
+                            "mediaRecommendation": {
+                                "id": 1001,
+                                "idMal": 2001,
+                                "title": {"userPreferred": "Manga With MAL ID"},
+                                "coverImage": {
+                                    "extraLarge": None,
+                                    "large": "cover.jpg",
+                                },
+                            },
+                        },
+                        {
+                            "mediaRecommendation": {
+                                "id": 1002,
+                                "idMal": None,
+                                "title": {"userPreferred": "AniList Only Manga"},
+                                "coverImage": {"extraLarge": None, "large": None},
+                            },
+                        },
+                    ],
+                },
+            },
+        }
+
+        results = anilist.get_recommendations_by_mal_id("98112", MediaTypes.MANGA.value)
+
+        self.assertEqual(
+            results,
+            [
+                {
+                    "media_id": 2001,
+                    "source": Sources.MAL.value,
+                    "media_type": MediaTypes.MANGA.value,
+                    "title": "Manga With MAL ID",
+                    "image": "cover.jpg",
+                },
+                {
+                    "media_id": 1002,
+                    "source": Sources.ANILIST.value,
+                    "media_type": MediaTypes.MANGA.value,
+                    "title": "AniList Only Manga",
+                    "image": settings.IMG_NONE,
+                },
+            ],
+        )
+        self.assertEqual(
+            mock_graphql_request.call_args.args[1],
+            {
+                "idMal": 98112,
+                "type": "MANGA",
+            },
+        )
 
     def test_anilist_anime(self):
         """Test the metadata method for anime from AniList."""

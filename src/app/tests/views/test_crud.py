@@ -22,6 +22,7 @@ from app.models import (
     Status,
     TMDBMovieMetadata,
 )
+from app.views import get_metadata_sync_cache_key
 
 
 class CreateMedia(TestCase):
@@ -583,4 +584,29 @@ class SyncIGDBMetadata(TestCase):
         self.assertEqual(
             movie_item.tmdb_content_rating_metadata.ratings["US"][0]["certification"],
             "R",
+        )
+
+
+class MetadataSyncCacheKey(TestCase):
+    """Test provider metadata refresh cache-key selection."""
+
+    def test_mal_anime_and_manga_use_versioned_cache_keys(self):
+        """Explicit refresh targets the versioned MAL detail cache entries."""
+        self.assertEqual(
+            get_metadata_sync_cache_key(
+                Sources.MAL.value,
+                MediaTypes.ANIME.value,
+                "123",
+                None,
+            ),
+            "mal_anime_v2_123",
+        )
+        self.assertEqual(
+            get_metadata_sync_cache_key(
+                Sources.MAL.value,
+                MediaTypes.MANGA.value,
+                "456",
+                None,
+            ),
+            "mal_manga_v2_456",
         )
