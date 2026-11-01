@@ -19,6 +19,7 @@ from app.tasks import (
     cleanup_expired_tmdb_content_ratings,
     refresh_tmdb_content_ratings_for_items,
 )
+from app.templatetags.app_tags import tmdb_content_rating_for_item
 
 
 class TMDBContentRatingTests(TestCase):
@@ -129,6 +130,58 @@ class TMDBContentRatingTests(TestCase):
             get_tmdb_content_rating_display(self.tv_item, "US")["label"],
             "TV-MA",
         )
+
+    def test_rating_falls_back_to_another_region_and_marks_its_source(self):
+        """A fallback keeps its actual TMDB region in the display data."""
+        store_tmdb_content_ratings(
+            self.movie_item,
+            {"US": [], "GB": [{"certification": "15"}]},
+        )
+
+        display = get_tmdb_content_rating_display(self.movie_item, "US")
+
+        self.assertEqual(display["region"], "GB")
+        self.assertEqual(display["label"], "15")
+        self.assertTrue(display["is_fallback"])
+
+    def test_movie_rating_dates_are_normalized_to_dates(self):
+        """TMDB timestamps are reduced to dates for the user's date formatter."""
+        store_tmdb_content_ratings(
+            self.movie_item,
+            {
+                "GB": [
+                    {
+                        "certification": "15",
+                        "release_date": "2014-08-01T00:00:00.000Z",
+                    },
+                ],
+            },
+        )
+
+        display = get_tmdb_content_rating_display(self.movie_item, "GB")
+
+        self.assertEqual(display["entries"][0]["release_date"], "2014-08-01")
+
+    def test_list_rating_tag_returns_the_region_of_the_displayed_rating(self):
+        """List templates can label a rating with its actual region."""
+        store_tmdb_content_ratings(
+            self.movie_item,
+            {"GB": [{"certification": "15"}]},
+        )
+
+        display = tmdb_content_rating_for_item(self.movie_item, "US")
+
+        self.assertEqual(display["region"], "GB")
+        self.assertEqual(display["label"], "15")
+
+    def test_successful_rating_lookup_with_no_ratings_is_explicit(self):
+        """A successful empty lookup is distinct from unknown rating data."""
+        store_tmdb_content_ratings(self.movie_item, {"US": []})
+
+        display = get_tmdb_content_rating_display(self.movie_item, "US")
+
+        self.assertEqual(display["label"], "No rating found")
+        self.assertFalse(display["is_fallback"])
 
     def test_expired_rating_is_not_displayed_before_cleanup_runs(self):
         """Expired labels stop displaying even before the cleanup task executes."""

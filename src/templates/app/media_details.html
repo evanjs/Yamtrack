@@ -191,7 +191,7 @@
               <ul class="mt-2 space-y-1 text-xs text-gray-400">
                 {% for entry in tmdb_content_rating.entries %}
                   <li>
-                    {{ entry.label }}{% if entry.release_type %} · {{ entry.release_type }}{% endif %}{% if entry.release_date %} · {{ entry.release_date }}{% endif %}
+                    {{ entry.label }}{% if entry.release_type %} · {{ entry.release_type }}{% endif %}{% if entry.release_date %} · {{ entry.release_date|iso_date_format:request.user }}{% endif %}
                   </li>
                 {% endfor %}
               </ul>

@@ -2,6 +2,7 @@ import re
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 from app.models import (
     TMDB_CONTENT_RATING_EVICT_AFTER,
@@ -414,6 +415,34 @@ def mark_tmdb_content_rating_attempt(item):
     return metadata
 
 
+def _tmdb_rating_labels(item, entries):
+    """Return non-empty, de-duplicated labels from one region's records."""
+    key = "certification" if item.media_type == MediaTypes.MOVIE.value else "rating"
+    return list(
+        dict.fromkeys(
+            entry.get(key, "").strip()
+            for entry in entries
+            if isinstance(entry.get(key), str) and entry[key].strip()
+        ),
+    )
+
+
+def _select_tmdb_rating(item, metadata, region):
+    """Choose the configured region's rating or the first available fallback."""
+    entries = metadata.ratings.get(region, [])
+    labels = _tmdb_rating_labels(item, entries)
+    if labels:
+        return region, entries, labels, False
+    for candidate_region in sorted(metadata.ratings):
+        if candidate_region == region:
+            continue
+        candidate_entries = metadata.ratings[candidate_region]
+        candidate_labels = _tmdb_rating_labels(item, candidate_entries)
+        if candidate_labels:
+            return candidate_region, candidate_entries, candidate_labels, True
+    return region, [], [], False
+
+
 def get_tmdb_content_rating_display(item, region):
     """Return SQL-backed card and detail rating labels for one region."""
     if not isinstance(item, Item) or not region or region == "UNSET":
@@ -427,16 +456,18 @@ def get_tmdb_content_rating_display(item, region):
         or metadata.synced_at < timezone.now() - TMDB_CONTENT_RATING_EVICT_AFTER
     ):
         return None
-    entries = metadata.ratings.get(region, [])
+    display_region, entries, labels, is_fallback = _select_tmdb_rating(
+        item, metadata, region
+    )
+    if not labels:
+        return {
+            "region": region,
+            "label": "No rating found",
+            "entries": [],
+            "is_fallback": False,
+        }
+
     if item.media_type == MediaTypes.MOVIE.value:
-        labels = list(
-            dict.fromkeys(
-                entry.get("certification", "").strip()
-                for entry in entries
-                if isinstance(entry.get("certification"), str)
-                and entry["certification"].strip()
-            ),
-        )
         details = [
             {
                 "label": entry["certification"].strip(),
@@ -449,21 +480,32 @@ def get_tmdb_content_rating_display(item, region):
                     5: "Physical",
                     6: "TV",
                 }.get(entry.get("type"), ""),
-                "release_date": entry.get("release_date") or "",
+                "release_date": _tmdb_rating_release_date(entry.get("release_date")),
             }
             for entry in entries
             if isinstance(entry.get("certification"), str)
             and entry["certification"].strip()
         ]
-        return {"region": region, "label": " / ".join(labels), "entries": details}
-    labels = list(
-        dict.fromkeys(
-            entry.get("rating", "").strip()
-            for entry in entries
-            if isinstance(entry.get("rating"), str) and entry["rating"].strip()
-        ),
-    )
-    return {"region": region, "label": " / ".join(labels), "entries": []}
+        return {
+            "region": display_region,
+            "label": " / ".join(labels),
+            "entries": details,
+            "is_fallback": is_fallback,
+        }
+    return {
+        "region": display_region,
+        "label": " / ".join(labels),
+        "entries": [],
+        "is_fallback": is_fallback,
+    }
+
+
+def _tmdb_rating_release_date(value):
+    """Return a TMDB release timestamp as an ISO date for localized display."""
+    if not isinstance(value, str) or not value:
+        return ""
+    date_value = value[:10]
+    return date_value if parse_date(date_value) else value
 
 
 def store_tmdb_movie_taxonomies(item, taxonomies):
