@@ -92,6 +92,26 @@ class TMDBPersonDiscoveryTests(TestCase):
         self.assertTrue(mock_api_request.call_args.args[2].endswith("/person/123"))
 
     @patch("app.providers.services.api_request")
+    def test_person_details_returns_birthday_and_deathday_from_cache(
+        self, mock_api_request
+    ):
+        """Expose both dates from the cached TMDB person response."""
+        mock_api_request.return_value = {
+            "birthday": "1931-03-26",
+            "deathday": "2015-02-27",
+        }
+
+        self.assertEqual(
+            tmdb.person_details("123"),
+            {"birthday": "1931-03-26", "deathday": "2015-02-27"},
+        )
+        self.assertEqual(
+            tmdb.person_details("123"),
+            {"birthday": "1931-03-26", "deathday": "2015-02-27"},
+        )
+        self.assertEqual(mock_api_request.call_count, 1)
+
+    @patch("app.providers.services.api_request")
     def test_movie_credit_sort_orders_all_directions(self, mock_api_request):
         """Sort credits by title or release date, keeping unknown dates last."""
         mock_api_request.return_value = {

@@ -311,6 +311,21 @@ def calculate_age_on_date(birthday, on_date):
     return age if age >= 0 else None
 
 
+def format_person_credit_age(birthday, deathday, event_date, event_label):
+    """Format the credit age, capping posthumous releases at death."""
+    age = calculate_age_on_date(birthday, event_date)
+    label = event_label
+    death_age = calculate_age_on_date(birthday, deathday)
+    try:
+        event_day = date.fromisoformat(event_date)
+        death_day = date.fromisoformat(deathday)
+    except (TypeError, ValueError):
+        event_day = death_day = None
+    if death_age is not None and event_day and death_day and event_day > death_day:
+        return f"{death_age} yo · died {death_day.year}"
+    return f"{age} yo at {label}" if age is not None else ""
+
+
 PERSON_DISCOVERY_ROLES = (
     ("all", "Any role"),
     ("cast", "Cast"),
@@ -351,15 +366,15 @@ def _person_discovery_results(user, person_id, role, sort, media_type):
         if media_type in {"both", MediaTypes.TV.value}
         else []
     )
-    birthday = tmdb.person_birthday(person_id) if movies or shows else None
-    _prepare_movie_credits(user, movies, birthday)
-    _prepare_tv_credits(user, shows, birthday)
+    person = tmdb.person_details(person_id) if movies or shows else {}
+    _prepare_movie_credits(user, movies, person)
+    _prepare_tv_credits(user, shows, person)
     combined = movies + shows
     _sort_person_credits(combined, sort)
     return movies, shows, combined
 
 
-def _prepare_movie_credits(user, credits, birthday):
+def _prepare_movie_credits(user, credits, person):
     """Add viewer tracking, card data, and age-at-release to movie credits."""
     tracked = Movie.objects.filter(
         user=user,
@@ -369,8 +384,10 @@ def _prepare_movie_credits(user, credits, birthday):
     ).select_related("item")
     tracked_by_id = {media.item.media_id: media for media in tracked}
     for credit in credits:
-        age = calculate_age_on_date(birthday, credit.get("release_date"))
-        credit["age_at_release"] = f"{age} yo" if age is not None else ""
+        credit["age_at_release"] = format_person_credit_age(
+            person.get("birthday"), person.get("deathday"),
+            credit.get("release_date"), "release",
+        )
         credit["media"] = tracked_by_id.get(str(credit["media_id"]))
         credit["media_type"] = MediaTypes.MOVIE.value
         credit["display_date"] = credit.get("release_date")
@@ -384,7 +401,7 @@ def _prepare_movie_credits(user, credits, birthday):
         }
 
 
-def _prepare_tv_credits(user, credits, birthday):
+def _prepare_tv_credits(user, credits, person):
     """Add viewer tracking, card data, and age-at-first-air to TV credits."""
     tracked = (
         TV.objects.filter(
@@ -398,8 +415,10 @@ def _prepare_tv_credits(user, credits, birthday):
     )
     tracked_by_id = {media.item.media_id: media for media in tracked}
     for credit in credits:
-        age = calculate_age_on_date(birthday, credit.get("first_air_date"))
-        credit["age_at_first_air"] = f"{age} yo" if age is not None else ""
+        credit["age_at_first_air"] = format_person_credit_age(
+            person.get("birthday"), person.get("deathday"),
+            credit.get("first_air_date"), "first air",
+        )
         credit["media"] = tracked_by_id.get(str(credit["media_id"]))
         credit["media_type"] = MediaTypes.TV.value
         credit["display_date"] = credit.get("first_air_date")

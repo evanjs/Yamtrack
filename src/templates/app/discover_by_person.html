@@ -158,8 +158,8 @@
               <div>
                 {% include "app/components/media_card.html" with item=credit.item title=credit.title media=credit.media from_grid=True %}
                 <div class="person-movie-role px-2">{{ credit.role }}</div>
-                {% if credit.media_type == "movie" and credit.age_at_release %}<div class="person-movie-meta px-2">{{ credit.age_at_release }} at release</div>{% endif %}
-                {% if credit.media_type == "tv" and credit.age_at_first_air %}<div class="person-movie-meta px-2">{{ credit.age_at_first_air }} at first air</div>{% endif %}
+                {% if credit.media_type == "movie" and credit.age_at_release %}<div class="person-movie-meta px-2">{{ credit.age_at_release }}</div>{% endif %}
+                {% if credit.media_type == "tv" and credit.age_at_first_air %}<div class="person-movie-meta px-2">{{ credit.age_at_first_air }}</div>{% endif %}
                 <div class="person-movie-meta px-2">{% if credit.media_type == "tv" %}First air date{% else %}Release date{% endif %}: {{ credit.display_date|default:"Unknown" }}</div>
                 <a href="https://www.themoviedb.org/{% if credit.media_type == 'tv' %}tv{% else %}movie{% endif %}/{{ credit.media_id }}"
                    target="_blank"

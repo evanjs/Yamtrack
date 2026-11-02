@@ -33,7 +33,10 @@ class PersonDiscoveryViewTests(TestCase):
         mock_movie_credits.assert_called_once_with("123", "all", "release_desc")
         mock_tv_credits.assert_called_once_with("123", "all", "release_desc")
 
-    @patch("app.providers.tmdb.person_birthday", return_value=None)
+    @patch(
+        "app.providers.tmdb.person_details",
+        return_value={"birthday": None, "deathday": None},
+    )
     @patch("app.providers.tmdb.person_tv_credits", return_value=[])
     @patch("app.providers.tmdb.person_movie_credits")
     def test_media_type_hint_limits_discovery_to_movies(
@@ -52,7 +55,10 @@ class PersonDiscoveryViewTests(TestCase):
         mock_movie_credits.assert_called_once_with("123", "all", "release_desc")
         mock_tv_credits.assert_not_called()
 
-    @patch("app.providers.tmdb.person_birthday", return_value="1960-01-01")
+    @patch(
+        "app.providers.tmdb.person_details",
+        return_value={"birthday": "1960-01-01", "deathday": None},
+    )
     @patch("app.providers.tmdb.person_tv_credits", return_value=[])
     @patch("app.providers.tmdb.person_movie_credits")
     def test_media_type_hint_limits_discovery_to_tv(
@@ -69,7 +75,10 @@ class PersonDiscoveryViewTests(TestCase):
         mock_tv_credits.assert_called_once_with("123", "all", "release_desc")
         mock_movie_credits.assert_not_called()
 
-    @patch("app.providers.tmdb.person_birthday", return_value="1960-01-01")
+    @patch(
+        "app.providers.tmdb.person_details",
+        return_value={"birthday": "1960-01-01", "deathday": None},
+    )
     @patch("app.providers.tmdb.person_tv_credits")
     @patch("app.providers.tmdb.person_movie_credits")
     def test_both_media_types_merge_by_primary_date_and_show_type_specific_age(
@@ -101,8 +110,33 @@ class PersonDiscoveryViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         results = response.context["all_credits"]
         self.assertEqual([credit["title"] for credit in results], ["A Show", "Z Movie"])
-        self.assertEqual(results[0]["age_at_first_air"], "41 yo")
-        self.assertEqual(results[1]["age_at_release"], "40 yo")
+        self.assertEqual(results[0]["age_at_first_air"], "41 yo at first air")
+        self.assertEqual(results[1]["age_at_release"], "40 yo at release")
+
+    @patch(
+        "app.providers.tmdb.person_details",
+        return_value={"birthday": "1931-03-26", "deathday": "2015-02-27"},
+    )
+    @patch("app.providers.tmdb.person_tv_credits")
+    @patch("app.providers.tmdb.person_movie_credits")
+    def test_posthumous_tv_credit_shows_age_at_death(
+        self, mock_movie_credits, mock_tv_credits, _mock_person
+    ):
+        """Use the person's age at death for a posthumous release."""
+        mock_movie_credits.return_value = []
+        mock_tv_credits.return_value = [
+            {
+                "media_id": "2",
+                "title": "Posthumous show",
+                "first_air_date": "2022-01-01",
+                "role": "Actor",
+            },
+        ]
+        response = self.client.get(reverse("discover_by_person"), {"person_id": "123"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "83 yo · died 2015")
+        self.assertNotContains(response, "83 yo at death")
 
     @patch("app.providers.tmdb.search_people")
     def test_person_query_renders_person_choices(self, mock_search_people):
@@ -123,7 +157,10 @@ class PersonDiscoveryViewTests(TestCase):
         self.assertContains(response, "flex: 0 0 3rem;")
         mock_search_people.assert_called_once_with("Jordan Peele")
 
-    @patch("app.providers.tmdb.person_birthday", return_value="1958-05-27")
+    @patch(
+        "app.providers.tmdb.person_details",
+        return_value={"birthday": "1958-05-27", "deathday": None},
+    )
     @patch("app.providers.tmdb.person_movie_credits")
     def test_selected_person_renders_sorted_credits_and_release_age(
         self,
@@ -165,7 +202,10 @@ class PersonDiscoveryViewTests(TestCase):
         mock_credits.assert_called_once_with("123", "director", "title_asc")
         mock_birthday.assert_called_once_with("123")
 
-    @patch("app.providers.tmdb.person_birthday", return_value=None)
+    @patch(
+        "app.providers.tmdb.person_details",
+        return_value={"birthday": None, "deathday": None},
+    )
     @patch("app.providers.tmdb.person_movie_credits")
     def test_movie_credit_shows_viewer_tracking_progress(self, mock_credits, _birthday):
         """Show progress only when the current user tracks the credited movie."""

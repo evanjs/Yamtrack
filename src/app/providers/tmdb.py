@@ -248,16 +248,16 @@ def search_people(query):
     return data
 
 
-def person_birthday(person_id):
-    """Return a person's TMDB birthday, cached independently from credits."""
+def person_details(person_id):
+    """Return a person's TMDB birthday and deathday, cached independently."""
     person_id = str(person_id)
     if not person_id.isdecimal() or int(person_id) <= 0:
         msg = f"Invalid TMDB person ID: {person_id!r}"
         raise ValueError(msg)
 
-    cache_key = f"{Sources.TMDB.value}_person_birthday_{person_id}"
-    birthday = cache.get(cache_key)
-    if birthday is None:
+    cache_key = f"{Sources.TMDB.value}_person_details_v2_{person_id}"
+    details = cache.get(cache_key)
+    if details is None:
         try:
             response = services.api_request(
                 Sources.TMDB.value,
@@ -269,14 +269,24 @@ def person_birthday(person_id):
             try:
                 handle_error(error)
             except services.ProviderAPIError as provider_error:
-                logger.warning("Could not fetch TMDB birthday: %s", provider_error)
-                return None
+                logger.warning(
+                    "Could not fetch TMDB person details: %s", provider_error
+                )
+                return {"birthday": None, "deathday": None}
         except requests.exceptions.RequestException as error:
-            logger.warning("Could not fetch TMDB birthday: %s", error)
-            return None
-        birthday = response.get("birthday") or ""
-        cache.set(cache_key, birthday)
-    return birthday or None
+            logger.warning("Could not fetch TMDB person details: %s", error)
+            return {"birthday": None, "deathday": None}
+        details = {
+            "birthday": response.get("birthday") or None,
+            "deathday": response.get("deathday") or None,
+        }
+        cache.set(cache_key, details)
+    return details
+
+
+def person_birthday(person_id):
+    """Return a person's TMDB birthday."""
+    return person_details(person_id)["birthday"]
 
 
 def person_movie_credits(person_id, role="all", sort="release_desc"):
