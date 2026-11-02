@@ -126,11 +126,25 @@ class Search(TestCase):
         self.assertEqual(variables["type"], "ANIME")
         self.assertEqual(variables["page"], 2)
         self.assertFalse(variables["isAdult"])
+        self.assertTrue(response["has_next_page"])
         self.assertEqual(
             response["total_results"],
             settings.PER_PAGE + 1 + settings.PER_PAGE,
         )
         self.assertEqual(response["results"][0]["media_id"], 1)
+
+    @patch("app.providers.anilist.services.api_request")
+    def test_anilist_search_filters_by_genre(self, mock_api_request):
+        """Genre discovery sends AniList's genre facet."""
+        mock_api_request.return_value = {
+            "data": {"Page": {"pageInfo": {"hasNextPage": False}, "media": []}},
+        }
+
+        anilist.search(MediaTypes.ANIME.value, "", 1, genre="Sci-Fi")
+
+        variables = mock_api_request.call_args.kwargs["params"]["variables"]
+        self.assertEqual(variables["genreIn"], ["Sci-Fi"])
+        self.assertIsNone(variables["search"])
 
     @override_settings(ANILIST_NSFW=True)
     @patch("app.providers.anilist.services.api_request")

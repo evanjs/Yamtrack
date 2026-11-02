@@ -176,7 +176,13 @@
         {# Genres #}
         <div class="flex flex-wrap gap-2 mb-4">
           {% for genre in media.genres %}
-            <span class="px-3 py-1 bg-violet-600 text-white rounded-full text-sm">{{ genre }}</span>
+            {% if media.source == "anilist" and media.media_type == "anime" or media.source == "anilist" and media.media_type == "manga" %}
+              <a href="{% url 'search' %}?q=&media_type={{ media.media_type }}&source={{ media.source }}&genre={{ genre|urlencode }}"
+                 class="px-3 py-1 bg-violet-600 text-white rounded-full text-sm hover:bg-violet-500"
+                 aria-label="{% blocktrans with genre=genre %}Search AniList for {{ genre }}{% endblocktrans %}">{{ genre }}</a>
+            {% else %}
+              <span class="px-3 py-1 bg-violet-600 text-white rounded-full text-sm">{{ genre }}</span>
+            {% endif %}
           {% endfor %}
         </div>
 

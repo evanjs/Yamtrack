@@ -14,23 +14,38 @@
       <div class="flex gap-x-2">
         {% with source_options=media_type|sources %}
           {% for source_option in source_options %}
-            <a href="{% url 'search' %}?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}&source={{ source_option.value }}&layout={{ layout }}"
+            <a href="{% url 'search' %}?{% if genre and source_option.value != source %}q={{ genre|urlencode }}&media_type={{ media_type }}&source={{ source_option.value }}&layout={{ layout }}&genre_text={{ genre|urlencode }}{% elif genre_text and source_option.value == 'anilist' %}q=&media_type={{ media_type }}&source={{ source_option.value }}&layout={{ layout }}&genre={{ genre_text|urlencode }}{% else %}q={{ request.GET.q|urlencode }}&media_type={{ media_type }}&source={{ source_option.value }}&layout={{ layout }}{% if genre %}&genre={{ genre|urlencode }}{% endif %}{% if genre_text %}&genre_text={{ genre_text|urlencode }}{% endif %}{% endif %}"
                class="px-3 py-1.5 text-sm rounded-md transition-colors duration-200 cursor-pointer flex items-center {% if source == source_option.value %}bg-indigo-600 text-white{% else %}bg-gray-700 text-gray-300 hover:bg-gray-600{% endif %}">
               {{ source_option.label }}
             </a>
           {% endfor %}
         {% endwith %}
         <div class="flex rounded-md overflow-hidden border border-gray-700">
-          <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&layout=grid"
+          <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}{% if genre %}&genre={{ genre|urlencode }}{% endif %}{% if genre_text %}&genre_text={{ genre_text|urlencode }}{% endif %}&layout=grid"
              {% if layout == 'grid' %} class="p-2 cursor-pointer bg-indigo-600 text-white flex items-center" {% else %} class="p-2 cursor-pointer bg-[#39404b] hover:bg-[#454d5a] flex items-center" {% endif %}
              title="{% trans 'Grid View' %}">{% include "app/icons/four-square.svg" with classes="w-5 h-5" %}</a>
-          <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&layout=list"
+          <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}{% if genre %}&genre={{ genre|urlencode }}{% endif %}{% if genre_text %}&genre_text={{ genre_text|urlencode }}{% endif %}&layout=list"
              {% if layout == 'list' %} class="p-2 cursor-pointer bg-indigo-600 text-white flex items-center" {% else %} class="p-2 cursor-pointer bg-[#39404b] hover:bg-[#454d5a] flex items-center" {% endif %}
              title="{% trans 'List View' %}">{% include "app/icons/list.svg" with classes="w-5 h-5" %}</a>
         </div>
       </div>
     </div>
   </div>
+
+  {% if genre_text %}
+    <div class="mb-5 inline-flex flex-wrap items-center gap-2 rounded-md bg-[#2a2f35] px-4 py-3"
+         style="border-left: 4px solid #d97706">
+      {% include "app/icons/info.svg" with classes="w-4 h-4 text-gray-300" %}
+      <span class="text-sm text-gray-300">{% blocktrans with genre=genre_text %}This is a text search, not a genre filter. Results for “{{ genre }}” may not match that genre.{% endblocktrans %}</span>
+    </div>
+  {% elif genre %}
+    <div class="mb-5 inline-flex flex-wrap items-center gap-2 rounded-md bg-[#2a2f35] px-4 py-3"
+         style="border-left: 4px solid #7c3aed">
+      {% include "app/icons/funnel.svg" with classes="w-4 h-4 text-indigo-400" %}
+      <span class="text-sm font-semibold text-indigo-300">{% trans "AniList genre" %}</span>
+      <span class="rounded-md bg-violet-600 px-3 py-1 text-sm font-semibold text-white">{{ genre }}</span>
+    </div>
+  {% endif %}
 
   {% if data.results %}
     <div {% if layout == 'grid' %}
@@ -46,11 +61,18 @@
   {% endif %}
   </div>
 
-  {% if data.total_pages > 1 %}
+  {% if is_anilist_search or data.total_pages > 1 %}
     <div class="flex flex-wrap justify-center items-center mt-8 gap-x-2 gap-y-3">
+      {% if is_anilist_search and data.page > 2 %}
+        <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}{% if genre %}&genre={{ genre|urlencode }}{% endif %}&page=1&layout={{ layout }}"
+           class="p-2 rounded-md bg-[#2a2f35] text-white hover:bg-[#39404b]"
+           title="{% trans 'First page' %}"
+           aria-label="{% trans 'First page' %}">{% include "app/icons/chevrons-left.svg" with classes="w-5 h-5" %}</a>
+      {% endif %}
+
       {# Previous button #}
       {% if data.page > 1 %}
-        <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&page={{ data.page|add:'-1' }}&layout={{ layout }}"
+        <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}{% if genre %}&genre={{ genre|urlencode }}{% endif %}{% if genre_text %}&genre_text={{ genre_text|urlencode }}{% endif %}&page={{ data.page|add:'-1' }}&layout={{ layout }}"
            class="p-2 rounded-md bg-[#2a2f35] text-white hover:bg-[#39404b]">
           {% include "app/icons/chevron-left.svg" with classes="w-5 h-5" %}
         </a>
@@ -59,25 +81,30 @@
                 disabled>{% include "app/icons/chevron-left.svg" with classes="w-5 h-5" %}</button>
       {% endif %}
 
-      {# Page numbers with ellipses #}
-      {% get_pagination_range data.page data.total_pages 2 as pages %}
-      {% for page_num in pages %}
-        {% if page_num %}
-          <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&page={{ page_num }}&layout={{ layout }}"
-             class="w-10 h-10 rounded-md {% if data.page == page_num %}bg-indigo-600{% else %}bg-[#2a2f35] hover:bg-[#39404b]{% endif %} text-white flex items-center justify-center">
-            {{ page_num }}
-          </a>
-        {% else %}
-          {# Ellipsis #}
-          <span class="flex items-center justify-center w-10 h-10 text-gray-400">
-            {% include "app/icons/ellipsis.svg" with classes="w-5 h-5" %}
-          </span>
-        {% endif %}
-      {% endfor %}
+      {% if is_anilist_search %}
+        <span class="px-3 text-sm text-gray-300"
+              aria-label="{% blocktrans with start=result_range_start end=result_range_end %}Results {{ start }} to {{ end }}{% endblocktrans %}">{{ result_range_start }}–{{ result_range_end }}</span>
+      {% else %}
+        {# Page numbers with ellipses #}
+        {% get_pagination_range data.page data.total_pages 2 as pages %}
+        {% for page_num in pages %}
+          {% if page_num %}
+            <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}{% if genre %}&genre={{ genre|urlencode }}{% endif %}{% if genre_text %}&genre_text={{ genre_text|urlencode }}{% endif %}&page={{ page_num }}&layout={{ layout }}"
+               class="w-10 h-10 rounded-md {% if data.page == page_num %}bg-indigo-600{% else %}bg-[#2a2f35] hover:bg-[#39404b]{% endif %} text-white flex items-center justify-center">
+              {{ page_num }}
+            </a>
+          {% else %}
+            {# Ellipsis #}
+            <span class="flex items-center justify-center w-10 h-10 text-gray-400">
+              {% include "app/icons/ellipsis.svg" with classes="w-5 h-5" %}
+            </span>
+          {% endif %}
+        {% endfor %}
+      {% endif %}
 
       {# Next button #}
-      {% if data.page < data.total_pages %}
-        <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&page={{ data.page|add:'1' }}&layout={{ layout }}"
+      {% if is_anilist_search and data.has_next_page or not is_anilist_search and data.page < data.total_pages %}
+        <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}{% if genre %}&genre={{ genre|urlencode }}{% endif %}{% if genre_text %}&genre_text={{ genre_text|urlencode }}{% endif %}&page={{ data.page|add:'1' }}&layout={{ layout }}"
            class="p-2 rounded-md bg-[#2a2f35] text-white hover:bg-[#39404b]">
           {% include "app/icons/chevron-right.svg" with classes="w-5 h-5" %}
         </a>
@@ -87,14 +114,16 @@
       {% endif %}
     </div>
 
-    {# Page info text #}
-    <div class="text-center text-sm text-gray-400 mt-3">
-      {% blocktrans trimmed count counter=data.total_results with page=data.page total_pages=data.total_pages %}
-        Page {{ page }} of {{ total_pages }} ({{ counter }} result)
-      {% plural %}
-        Page {{ page }} of {{ total_pages }} ({{ counter }} results)
-      {% endblocktrans %}
-    </div>
+    {% if not is_anilist_search %}
+      {# Page info text #}
+      <div class="text-center text-sm text-gray-400 mt-3">
+        {% blocktrans trimmed count counter=data.total_results with page=data.page total_pages=data.total_pages %}
+          Page {{ page }} of {{ total_pages }} ({{ counter }} result)
+        {% plural %}
+          Page {{ page }} of {{ total_pages }} ({{ counter }} results)
+        {% endblocktrans %}
+      </div>
+    {% endif %}
   {% endif %}
 {% else %}
   <div class="flex flex-col items-center justify-center py-32 px-4 bg-[#2a2f35] rounded-lg">

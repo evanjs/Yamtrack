@@ -1103,7 +1103,7 @@ def media_search(request):
         "last_search_type",
         request.GET["media_type"],
     )
-    query = request.GET["q"]
+    query = request.GET.get("q", "")
     page = int(request.GET.get("page", 1))
     layout = request.GET.get("layout", "grid")
 
@@ -1112,14 +1112,25 @@ def media_search(request):
         "source",
         config.get_default_source_name(media_type).value,
     )
-
-    data = services.search(
-        media_type,
-        query,
-        page,
-        source,
-        show_adult_titles=request.user.show_adult_titles,
+    genre = request.GET.get("genre") if source == Sources.ANILIST.value else None
+    genre_text = request.GET.get("genre_text")
+    if source == Sources.ANILIST.value or genre_text != query:
+        genre_text = None
+    is_anilist_search = (
+        source == Sources.ANILIST.value
+        and media_type in {MediaTypes.ANIME.value, MediaTypes.MANGA.value}
     )
+
+    search_kwargs = {"show_adult_titles": request.user.show_adult_titles}
+    if genre:
+        search_kwargs["genre"] = genre
+    data = services.search(media_type, query, page, source, **search_kwargs)
+    result_range = None
+    if is_anilist_search and data.get("results"):
+        result_range = (
+            (page - 1) * settings.PER_PAGE + 1,
+            (page - 1) * settings.PER_PAGE + len(data["results"]),
+        )
 
     # Enrich search results with user tracking data
     if data.get("results"):
@@ -1132,6 +1143,11 @@ def media_search(request):
         "source": source,
         "media_type": media_type,
         "layout": layout,
+        "genre": genre,
+        "genre_text": genre_text,
+        "is_anilist_search": is_anilist_search,
+        "result_range_start": result_range[0] if result_range else None,
+        "result_range_end": result_range[1] if result_range else None,
     }
 
     return render(request, "app/search.html", context)

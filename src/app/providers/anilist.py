@@ -39,12 +39,19 @@ query (
     $page: Int
     $perPage: Int
     $isAdult: Boolean
+    $genreIn: [String]
 ) {
     Page(page: $page, perPage: $perPage) {
         pageInfo {
             hasNextPage
         }
-        media(search: $search, type: $type, isAdult: $isAdult, sort: SEARCH_MATCH) {
+        media(
+            search: $search
+            type: $type
+            isAdult: $isAdult
+            genre_in: $genreIn
+            sort: SEARCH_MATCH
+        ) {
             ...MediaCard
         }
     }
@@ -152,21 +159,23 @@ def graphql_request(query, variables):
     return response["data"]
 
 
-def search(media_type, query, page, *, show_adult_titles=True):
+def search(media_type, query, page, *, show_adult_titles=True, genre=None):
     """Search for anime or manga on AniList."""
     cache_key = (
-        f"search_{Sources.ANILIST.value}_{media_type}_{query}_{page}"
+        f"search_{Sources.ANILIST.value}_{media_type}_{query}_{genre}_{page}"
         f"_{show_adult_titles}_{settings.ANILIST_NSFW}"
     )
     data = cache.get(cache_key)
 
     if data is None:
         variables = {
-            "search": query,
+            "search": query or None,
             "type": media_type.upper(),
             "page": page,
             "perPage": settings.PER_PAGE,
         }
+        if genre:
+            variables["genreIn"] = [genre]
         # AniList filters by null instead of ignoring it, leave it out to get all
         if not settings.ANILIST_NSFW or not show_adult_titles:
             variables["isAdult"] = False
@@ -185,6 +194,7 @@ def search(media_type, query, page, *, show_adult_titles=True):
             total_results,
             results,
         )
+        data["has_next_page"] = response["pageInfo"]["hasNextPage"]
 
         cache.set(cache_key, data)
 
