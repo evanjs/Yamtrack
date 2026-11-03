@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import requests
 from django.conf import settings
+from django.core.cache import cache
 from django.test import TestCase
 
 from app.models import Episode, Item, MediaTypes, Sources
@@ -27,6 +28,218 @@ mock_path = Path(__file__).resolve().parent.parent / "mock_data"
 
 class Metadata(TestCase):
     """Test the external API calls for media details."""
+
+    @patch("app.providers.tmdb.services.api_request")
+    def test_trakt_ratings_normalize_external_scores(self, mock_api_request):
+        """Normalize available Trakt external scores for detail-page display."""
+        cache.delete("trakt_ratings_movie_9876543_v3")
+        mock_api_request.return_value = {
+            "rating": 8.0,
+            "imdb": {
+                "rating": 8.5,
+                "link": "https://www.imdb.com/title/tt1234567/",
+            },
+            "metascore": {
+                "rating": 86,
+                "link": "https://www.imdb.com/title/tt1234567/criticreviews",
+            },
+            "rotten_tomatoes": {
+                "rating": 96,
+                "user_rating": 92,
+                "link": "https://www.rottentomatoes.com/m/example_movie",
+            },
+            "letterboxd": {
+                "rating": 4.12,
+                "link": "https://letterboxd.com/film/example-movie/",
+            },
+            "mal": {"rating": None},
+        }
+
+        result = tmdb.get_trakt_ratings(
+            "9876543",
+            "https://trakt.tv/movies/example-movie",
+            MediaTypes.MOVIE.value,
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "label": "Trakt",
+                    "rating": 8.0,
+                    "scale": 10,
+                    "link": "https://trakt.tv/movies/example-movie",
+                },
+                {
+                    "label": "IMDb",
+                    "rating": 8.5,
+                    "scale": 10,
+                    "link": "https://www.imdb.com/title/tt1234567/",
+                },
+                {
+                    "label": "Metascore",
+                    "rating": 86,
+                    "scale": 100,
+                },
+                {
+                    "label": "Rotten Tomatoes critic",
+                    "rating": 96,
+                    "scale": 100,
+                    "link": "https://www.rottentomatoes.com/m/example_movie/reviews",
+                },
+                {
+                    "label": "Rotten Tomatoes audience",
+                    "rating": 92,
+                    "scale": 100,
+                    "link": "https://www.rottentomatoes.com/m/example_movie/reviews/all-audience",
+                },
+                {
+                    "label": "Letterboxd",
+                    "rating": 4.12,
+                    "scale": 5,
+                    "link": "https://letterboxd.com/film/example-movie/",
+                },
+            ],
+        )
+        self.assertEqual(
+            tmdb.get_trakt_ratings(
+                "9876543",
+                "https://trakt.tv/movies/example-movie",
+                MediaTypes.MOVIE.value,
+            ),
+            result,
+        )
+        mock_api_request.assert_called_once_with(
+            "trakt",
+            "GET",
+            "https://api.trakt.tv/movies/example-movie/ratings",
+            params={"extended": "all"},
+            headers={
+                "trakt-api-version": "2",
+                "trakt-api-key": settings.TRAKT_API,
+                "Content-Type": "application/json",
+            },
+        )
+
+    @patch("app.providers.tmdb.services.api_request")
+    def test_metascore_links_only_to_metacritic_pages(self, mock_api_request):
+        """Do not route a Metascore card to Trakt's IMDb critic-review URL."""
+        cache.delete("trakt_ratings_movie_9876549_v3")
+        mock_api_request.return_value = {
+            "rating": 8.0,
+            "metascore": {
+                "rating": 85,
+                "link": "https://www.metacritic.com/movie/example-movie/",
+            },
+        }
+
+        result = tmdb.get_trakt_ratings(
+            "9876549",
+            "https://trakt.tv/movies/example-movie",
+            MediaTypes.MOVIE.value,
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "label": "Trakt",
+                    "rating": 8.0,
+                    "scale": 10,
+                    "link": "https://trakt.tv/movies/example-movie",
+                },
+                {
+                    "label": "Metascore",
+                    "rating": 85,
+                    "scale": 100,
+                    "link": "https://www.metacritic.com/movie/example-movie/",
+                },
+            ],
+        )
+
+    @patch("app.providers.tmdb.services.api_request")
+    def test_trakt_tv_ratings_omit_movie_only_sources(self, mock_api_request):
+        """Show ratings exclude Letterboxd when Trakt has no TV data."""
+        cache.delete("trakt_ratings_tv_1234567_v3")
+        mock_api_request.return_value = {
+            "rating": 7.5,
+            "rotten_tomatoes": {
+                "rating": 88,
+                "user_rating": 84,
+                "link": "https://www.rottentomatoes.com/tv/example-show",
+            },
+            "letterboxd": {"rating": 4.1},
+            "mal": {"rating": None},
+        }
+
+        result = tmdb.get_trakt_ratings(
+            "1234567",
+            "https://trakt.tv/shows/example-show",
+            MediaTypes.TV.value,
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "label": "Trakt",
+                    "rating": 7.5,
+                    "scale": 10,
+                    "link": "https://trakt.tv/shows/example-show",
+                },
+                {
+                    "label": "Rotten Tomatoes critic",
+                    "rating": 88,
+                    "scale": 100,
+                    "link": "https://www.rottentomatoes.com/tv/example-show/reviews",
+                },
+                {
+                    "label": "Rotten Tomatoes audience",
+                    "rating": 84,
+                    "scale": 100,
+                    "link": "https://www.rottentomatoes.com/tv/example-show/reviews/all-audience",
+                },
+            ],
+        )
+
+    @patch("app.providers.tmdb.services.api_request")
+    def test_trakt_ratings_drop_external_links_with_unexpected_hosts(
+        self,
+        mock_api_request,
+    ):
+        """Reject unsafe or unrelated provider URLs while retaining score data."""
+        cache.delete("trakt_ratings_movie_9876500_v3")
+        mock_api_request.return_value = {
+            "rating": 7.5,
+            "imdb": {
+                "rating": 8.0,
+                "link": "https://imdb.com.attacker.example/title/tt1234567",
+            },
+            "rotten_tomatoes": {
+                "rating": 88,
+                "link": "http://www.rottentomatoes.com/m/example_movie",
+            },
+        }
+
+        result = tmdb.get_trakt_ratings(
+            "9876500",
+            "https://trakt.tv/movies/example-movie",
+            MediaTypes.MOVIE.value,
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "label": "Trakt",
+                    "rating": 7.5,
+                    "scale": 10,
+                    "link": "https://trakt.tv/movies/example-movie",
+                },
+                {"label": "IMDb", "rating": 8.0, "scale": 10},
+                {"label": "Rotten Tomatoes critic", "rating": 88, "scale": 100},
+            ],
+        )
 
     @patch("app.providers.tmdb.services.api_request")
     def test_tmdb_trakt_lookup_builds_direct_link_from_slug(self, mock_api_request):

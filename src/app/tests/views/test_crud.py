@@ -22,6 +22,7 @@ from app.models import (
     Status,
     TMDBMovieMetadata,
 )
+from app.providers import tmdb
 from app.views import get_metadata_sync_cache_key
 
 
@@ -584,6 +585,9 @@ class SyncIGDBMetadata(TestCase):
         self.assertEqual(
             movie_item.tmdb_content_rating_metadata.ratings["US"][0]["certification"],
             "R",
+        )
+        _mock_cache_delete.assert_any_call(
+            tmdb.trakt_ratings_cache_key(MediaTypes.MOVIE.value, "321"),
         )
 
 

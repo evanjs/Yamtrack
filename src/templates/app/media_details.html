@@ -222,9 +222,10 @@
         </div>
 
         {# Source score #}
-        <div class="flex flex-wrap gap-4">
+        <div class="grid gap-3"
+             style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));">
           {% if media.score_count is not None %}
-            <div class="bg-[#2a2f35] p-3 rounded-lg w-30">
+            <div class="bg-[#2a2f35] p-3 rounded-lg w-full">
               <h3 class="text-xs font-semibold text-gray-400 mb-1 text-center">{% blocktrans with source=media.source|upper %}{{ source }} SCORE{% endblocktrans %}</h3>
               <div class="flex items-center justify-center">
                 {% include "app/icons/star.svg" with classes="w-5 h-5 mr-1.5 text-yellow-400 fill-yellow-400" %}
@@ -240,13 +241,32 @@
             </div>
           {% endif %}
 
+          {# External ratings via Trakt #}
+          {% for rating in external_ratings %}
+            {% if rating.link %}
+              <a href="{{ rating.link }}"
+                 target="_self"
+                 aria-label="{{ rating.label }} rating {{ rating.rating }} out of {{ rating.scale }}. Open source page."
+                 class="block bg-[#2a2f35] p-3 rounded-lg w-full transition-colors hover:bg-[#343a40] focus:ring-2 focus:ring-indigo-400 cursor-pointer">
+            {% else %}
+              <div class="bg-[#2a2f35] p-3 rounded-lg w-full"
+                   aria-label="{{ rating.label }}">
+            {% endif %}
+              <h3 class="text-xs font-semibold text-gray-400 mb-1 text-center">{{ rating.label }}</h3>
+              <div class="flex items-center justify-center">
+                <span class="text-lg font-bold text-white">{{ rating.rating|floatformat:"-2" }}</span>
+                <span class="text-gray-400 ml-0.5 text-sm">/{{ rating.scale }}</span>
+              </div>
+            {% if rating.link %}</a>{% else %}</div>{% endif %}
+          {% endfor %}
+
           {# User score #}
           {% if user_medias %}
             <div x-data="{ showRatingPopup: false, rating: {{ current_instance.score|default:'null' }}, hoverRating: null, isHovering: false }"
                  class="relative">
               <!-- Rating display -->
               <div @click="showRatingPopup = !showRatingPopup"
-                   class="bg-[#2a2f35] p-3 rounded-lg w-30 cursor-pointer">
+                   class="bg-[#2a2f35] p-3 rounded-lg w-full cursor-pointer">
                 <h3 class="text-xs font-semibold text-gray-400 mb-1 text-center">{% trans "YOUR SCORE" %}</h3>
                 <div class="flex items-center justify-center">
                   {% include "app/icons/star.svg" with classes="w-5 h-5 mr-1.5 text-yellow-400 fill-yellow-400" %}

@@ -70,6 +70,74 @@ class MediaDetailsViewTests(TestCase):
             Sources.TMDB.value,
         )
 
+    @patch("app.views.tmdb.get_trakt_ratings")
+    @patch("app.providers.services.get_media_metadata")
+    def test_tmdb_movie_details_display_external_ratings(
+        self,
+        mock_get_metadata,
+        mock_get_trakt_ratings,
+    ):
+        """Show available Trakt scores alongside TMDB's existing score."""
+        mock_get_metadata.return_value = {
+            "media_id": "238",
+            "title": "Test Movie",
+            "media_type": MediaTypes.MOVIE.value,
+            "source": Sources.TMDB.value,
+            "image": "https://example.com/image.jpg",
+            "overview": "Test overview",
+            "genres": [],
+            "external_links": {"Trakt": "https://trakt.tv/movies/test-movie"},
+        }
+        mock_get_trakt_ratings.return_value = [
+            {
+                "label": "Rotten Tomatoes critic",
+                "rating": 96,
+                "scale": 100,
+                "link": "https://www.rottentomatoes.com/m/test_movie/reviews",
+            },
+            {
+                "label": "Rotten Tomatoes audience",
+                "rating": 92,
+                "scale": 100,
+                "link": "https://www.rottentomatoes.com/m/test_movie/reviews/all-audience",
+            },
+        ]
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.TMDB.value,
+                    "media_type": MediaTypes.MOVIE.value,
+                    "media_id": "238",
+                    "title": "test-movie",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["external_ratings"],
+            mock_get_trakt_ratings.return_value,
+        )
+        self.assertContains(response, "Rotten Tomatoes critic")
+        self.assertContains(response, "Rotten Tomatoes audience")
+        self.assertContains(response, "96")
+        self.assertContains(response, "92")
+        self.assertIn(
+            '<a href="https://www.rottentomatoes.com/m/test_movie/reviews"',
+            response.content.decode(),
+        )
+        self.assertContains(
+            response,
+            "grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr))",
+        )
+        mock_get_trakt_ratings.assert_called_once_with(
+            "238",
+            "https://trakt.tv/movies/test-movie",
+            MediaTypes.MOVIE.value,
+        )
+
     @patch(
         "app.providers.protondb.summary",
         return_value={

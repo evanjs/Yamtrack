@@ -129,6 +129,28 @@ def get_tmdb_rating_for_details(source, media_type, media_id, region):
     return get_tmdb_content_rating_display(item, region)
 
 
+def get_trakt_ratings_for_details(source, media_type, media_id, metadata):
+    """Return optional Trakt ratings when TMDB metadata has a valid Trakt link."""
+    if source != Sources.TMDB.value or media_type not in {
+        MediaTypes.MOVIE.value,
+        MediaTypes.TV.value,
+    }:
+        return []
+    trakt_link = (metadata.get("external_links") or {}).get("Trakt")
+    if not trakt_link:
+        return []
+    return tmdb.get_trakt_ratings(media_id, trakt_link, media_type)
+
+
+def invalidate_trakt_ratings_cache(source, media_type, media_id):
+    """Clear optional external ratings when synchronizing TMDB metadata."""
+    if source == Sources.TMDB.value and media_type in {
+        MediaTypes.MOVIE.value,
+        MediaTypes.TV.value,
+    }:
+        cache.delete(tmdb.trakt_ratings_cache_key(media_type, media_id))
+
+
 def get_metadata_sync_cache_key(source, media_type, media_id, season_number):
     """Return the active cache key for a metadata sync request."""
     version = (
@@ -1212,6 +1234,12 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         media_id,
         getattr(request.user, "tmdb_content_rating_region", "UNSET"),
     )
+    external_ratings = get_trakt_ratings_for_details(
+        source,
+        media_type,
+        media_id,
+        media_metadata,
+    )
     steam_rating = None
     steam_rating_art = None
     steam_rating_icon = None
@@ -1262,6 +1290,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         "watch_providers": watch_providers,
         "watch_provider_region": request.user.watch_provider_region,
         "tmdb_content_rating": tmdb_content_rating,
+        "external_ratings": external_ratings,
         "steam_rating": steam_rating,
         "steam_rating_agency": getattr(
             request.user,
@@ -1405,6 +1434,7 @@ def sync_metadata(request, source, media_type, media_id, season_number=None):
     else:
         deleted = cache.delete(cache_key)
         logger.debug("%s - Old cache deleted: %s", cache_key, deleted)
+        invalidate_trakt_ratings_cache(source, media_type, media_id)
 
         metadata = services.get_media_metadata(
             media_type,

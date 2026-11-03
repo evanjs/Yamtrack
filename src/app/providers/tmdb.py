@@ -1,5 +1,6 @@
 import logging
 from datetime import timedelta
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
 from django.conf import settings
@@ -12,6 +13,16 @@ from app.models import MediaTypes, Sources
 from app.providers import services
 
 logger = logging.getLogger(__name__)
+TRAKT_PATH_PART_COUNT = 2
+TRAKT_RATINGS_CACHE_VERSION = 3
+RATING_LINK_HOSTS = {
+    "IMDb": {"imdb.com", "www.imdb.com"},
+    "Metascore": {"metacritic.com", "www.metacritic.com"},
+    "Rotten Tomatoes critic": {"rottentomatoes.com", "www.rottentomatoes.com"},
+    "Rotten Tomatoes audience": {"rottentomatoes.com", "www.rottentomatoes.com"},
+    "Letterboxd": {"letterboxd.com", "www.letterboxd.com"},
+    "MyAnimeList": {"myanimelist.net", "www.myanimelist.net"},
+}
 base_url = "https://api.themoviedb.org/3"
 base_params = {
     "api_key": settings.TMDB_API,
@@ -114,6 +125,147 @@ def get_trakt_link(tmdb_id, media_type):
             trakt_path = "movies" if trakt_type == "movie" else "shows"
             return f"https://trakt.tv/{trakt_path}/{slug}"
     return None
+
+
+def get_trakt_ratings(tmdb_id, trakt_url, media_type):
+    """Return available external ratings from Trakt for a TMDB item."""
+    trakt_type = {
+        MediaTypes.MOVIE.value: "movie",
+        MediaTypes.TV.value: "show",
+    }.get(media_type)
+    if not tmdb_id or not trakt_url or not trakt_type or not settings.TRAKT_API:
+        return []
+
+    parsed_url = urlsplit(trakt_url)
+    path_parts = parsed_url.path.strip("/").split("/")
+    expected_path = "movies" if trakt_type == "movie" else "shows"
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.netloc != "trakt.tv"
+        or len(path_parts) != TRAKT_PATH_PART_COUNT
+        or path_parts[0] != expected_path
+        or not path_parts[1]
+    ):
+        return []
+
+    trakt_slug = quote(path_parts[1], safe="-")
+    cache_key = trakt_ratings_cache_key(media_type, tmdb_id)
+    cached_data = cache.get(cache_key)
+    if cached_data is not None:
+        return cached_data
+
+    headers = {
+        "trakt-api-version": "2",
+        "trakt-api-key": settings.TRAKT_API,
+        "Content-Type": "application/json",
+    }
+    try:
+        endpoint_type = "movies" if trakt_type == "movie" else "shows"
+        ratings = services.api_request(
+            "trakt",
+            "GET",
+            f"https://api.trakt.tv/{endpoint_type}/{trakt_slug}/ratings",
+            params={"extended": "all"},
+            headers=headers,
+        )
+    except requests.exceptions.RequestException as error:
+        logger.warning("Failed to retrieve Trakt ratings for %s: %s", trakt_slug, error)
+        cache.set(cache_key, [], timeout=300)
+        return []
+
+    if not isinstance(ratings, dict):
+        cache.set(cache_key, [])
+        return []
+
+    data = _normalize_trakt_ratings(ratings, trakt_type, trakt_url)
+    cache.set(cache_key, data)
+    return data
+
+
+def _normalize_trakt_ratings(ratings, trakt_type, trakt_url):
+    """Normalize Trakt scores and validated provider links for the UI."""
+    trakt_ratings = ratings.get("trakt")
+    if not isinstance(trakt_ratings, dict):
+        trakt_ratings = ratings
+    source_fields = [
+        ("Trakt", trakt_ratings, "rating", 10),
+        ("IMDb", ratings.get("imdb"), "rating", 10),
+        ("Metascore", ratings.get("metascore"), "rating", 100),
+        (
+            "Rotten Tomatoes critic",
+            ratings.get("rotten_tomatoes"),
+            "rating",
+            100,
+        ),
+        (
+            "Rotten Tomatoes audience",
+            ratings.get("rotten_tomatoes"),
+            "user_rating",
+            100,
+        ),
+    ]
+    if trakt_type == "movie":
+        source_fields.extend(
+            [
+                ("Letterboxd", ratings.get("letterboxd"), "rating", 5),
+                ("MyAnimeList", ratings.get("mal"), "rating", 10),
+            ],
+        )
+    else:
+        source_fields.append(("MyAnimeList", ratings.get("mal"), "rating", 10))
+
+    data = []
+    for label, source_data, field, scale in source_fields:
+        value = source_data.get(field) if isinstance(source_data, dict) else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            rating = {"label": label, "rating": value, "scale": scale}
+            link = (
+                trakt_url
+                if label == "Trakt"
+                else _get_trakt_rating_source_link(label, source_data)
+            )
+            if link:
+                rating["link"] = link
+            data.append(rating)
+
+    return data
+
+
+def _get_trakt_rating_source_link(label, source_data):
+    """Accept only HTTPS rating links for the expected provider host."""
+    allowed_hosts = RATING_LINK_HOSTS.get(label)
+    if not allowed_hosts or not isinstance(source_data, dict):
+        return None
+    link = source_data.get("link")
+    if not isinstance(link, str):
+        return None
+
+    try:
+        parsed_link = urlsplit(link)
+        has_port = parsed_link.port is not None
+    except ValueError:
+        return None
+    if (
+        parsed_link.scheme != "https"
+        or parsed_link.hostname not in allowed_hosts
+        or parsed_link.username
+        or parsed_link.password
+        or has_port
+    ):
+        return None
+    review_path = {
+        "Rotten Tomatoes critic": "/reviews",
+        "Rotten Tomatoes audience": "/reviews/all-audience",
+    }.get(label)
+    if review_path:
+        path = f"{parsed_link.path.rstrip('/')}{review_path}"
+        return urlunsplit(parsed_link._replace(path=path, fragment=""))
+    return link
+
+
+def trakt_ratings_cache_key(media_type, tmdb_id):
+    """Return the active cache key for optional Trakt ratings."""
+    return f"trakt_ratings_{media_type}_{tmdb_id}_v{TRAKT_RATINGS_CACHE_VERSION}"
 
 
 def add_trakt_link(metadata, tmdb_id, media_type, provider_response):
