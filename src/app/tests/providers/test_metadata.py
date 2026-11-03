@@ -1287,6 +1287,7 @@ class Metadata(TestCase):
             igdb.get_steam_store_links(response),
             {
                 "Steam": "https://store.steampowered.com/app/292030/",
+                "SteamDB": "https://steamdb.info/app/292030/",
                 "ProtonDB": "https://www.protondb.com/app/292030",
                 "PCGamingWiki": (
                     "https://www.pcgamingwiki.com/api/appid.php?appid=292030"
