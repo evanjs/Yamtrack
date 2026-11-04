@@ -2,10 +2,12 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 
 from app import config
+from app.metadata import store_tmdb_content_ratings
 from app.models import (
     Item,
     MediaTypes,
@@ -25,6 +27,145 @@ class MediaDetailsViewTests(TestCase):
         self.credentials = {"username": "test", "password": "12345"}
         self.user = get_user_model().objects.create_user(**self.credentials)
         self.client.login(**self.credentials)
+
+    @patch("app.views.refresh_tmdb_content_ratings_for_items.delay")
+    @patch("app.providers.services.get_media_metadata")
+    def test_untracked_tmdb_detail_visit_creates_item_and_queues_rating(
+        self, mock_get_metadata, mock_refresh
+    ):
+        """A configured rating preference hydrates an untracked detail visit."""
+        self.user.tmdb_content_rating_region = "US"
+        self.user.save(update_fields=["tmdb_content_rating_region"])
+        mock_get_metadata.return_value = {
+            "media_id": "7654",
+            "title": "Untracked Movie",
+            "media_type": "movie",
+            "source": "tmdb",
+            "image": "https://example.com/untracked.jpg",
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": "tmdb",
+                    "media_type": "movie",
+                    "media_id": "7654",
+                    "title": "untracked-movie",
+                },
+            )
+        )
+        item = Item.objects.get(source="tmdb", media_type="movie", media_id="7654")
+        self.assertContains(response, 'hx-trigger="load"')
+        cache.delete(f"tmdb_content_rating_request_{item.pk}")
+        self.client.get(
+            reverse(
+                "tmdb_content_rating",
+                kwargs={
+                    "source": "tmdb",
+                    "media_type": "movie",
+                    "media_id": "7654",
+                },
+            )
+        )
+        mock_refresh.assert_called_once_with([item.pk])
+        self.assertFalse(Movie.objects.filter(item=item, user=self.user).exists())
+
+    @patch("app.views.refresh_tmdb_content_ratings_for_items.delay")
+    @patch("app.providers.services.get_media_metadata")
+    def test_tmdb_content_rating_fragment_queues_missing_rating_and_renders_loading(
+        self, mock_get_metadata, mock_refresh
+    ):
+        """Queue a single background fetch while the badge is polling."""
+        item = Item.objects.create(
+            media_id="238",
+            source="tmdb",
+            media_type="movie",
+            title="Test Movie",
+            image="https://example.com/image.jpg",
+        )
+        self.user.tmdb_content_rating_region = "US"
+        self.user.save(update_fields=["tmdb_content_rating_region"])
+        mock_get_metadata.return_value = {
+            "media_id": "238",
+            "title": "Test Movie",
+            "media_type": "movie",
+            "source": "tmdb",
+            "image": "https://example.com/image.jpg",
+        }
+        detail_response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": "tmdb",
+                    "media_type": "movie",
+                    "media_id": "238",
+                    "title": "test-movie",
+                },
+            )
+        )
+        self.assertContains(detail_response, 'hx-trigger="load"')
+        self.assertNotContains(detail_response, 'hx-trigger="every 3s"')
+        response = self.client.get(
+            reverse(
+                "tmdb_content_rating",
+                kwargs={
+                    "source": "tmdb",
+                    "media_type": "movie",
+                    "media_id": "238",
+                },
+            )
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Loading content rating")
+        self.assertContains(response, 'hx-trigger="every 3s"')
+        self.assertNotContains(response, 'hx-trigger="load, every 3s"')
+        mock_refresh.assert_called_once_with([item.pk])
+        self.client.get(
+            reverse(
+                "tmdb_content_rating",
+                kwargs={
+                    "source": "tmdb",
+                    "media_type": "movie",
+                    "media_id": "238",
+                },
+            )
+        )
+        mock_refresh.assert_called_once()
+
+    @patch("app.views.refresh_tmdb_content_ratings_for_items.delay")
+    def test_tmdb_content_rating_fragment_stops_polling_after_success(
+        self, mock_refresh
+    ):
+        """Render a saved rating and stop polling once the fetch succeeds."""
+        item = Item.objects.create(
+            media_id="987",
+            source="tmdb",
+            media_type="movie",
+            title="Rated Movie",
+            image="https://example.com/image.jpg",
+        )
+        store_tmdb_content_ratings(
+            item,
+            {"US": [{"certification": "PG-13", "type": 3}]},
+        )
+        self.user.tmdb_content_rating_region = "US"
+        self.user.save(update_fields=["tmdb_content_rating_region"])
+
+        response = self.client.get(
+            reverse(
+                "tmdb_content_rating",
+                kwargs={
+                    "source": "tmdb",
+                    "media_type": "movie",
+                    "media_id": "987",
+                },
+            )
+        )
+
+        self.assertContains(response, "US · PG-13")
+        self.assertNotContains(response, "hx-get=")
+        mock_refresh.assert_not_called()
 
     @patch("app.providers.services.get_media_metadata")
     def test_media_details_view(self, mock_get_metadata):

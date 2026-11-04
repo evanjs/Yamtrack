@@ -36,6 +36,8 @@ from app.metadata import (
     store_tmdb_movie_taxonomies,
 )
 from app.models import (
+    TMDB_CONTENT_RATING_REFRESH_AFTER,
+    TMDB_CONTENT_RATING_RETRY_AFTER,
     TV,
     BasicMedia,
     Episode,
@@ -46,6 +48,7 @@ from app.models import (
     Season,
     Sources,
     Status,
+    TMDBContentRatingMetadata,
     TMDBMovieCredit,
     TMDBMovieCreditAssignment,
     TMDBMovieTaxonomy,
@@ -53,7 +56,7 @@ from app.models import (
     tmdb_metadata_expiry_cutoff,
 )
 from app.providers import manual, protondb, services, tmdb
-from app.tasks import refresh_steam_app_items
+from app.tasks import refresh_steam_app_items, refresh_tmdb_content_ratings_for_items
 from app.templatetags import app_tags
 from events.models import Event
 from users.models import (
@@ -127,6 +130,69 @@ def get_tmdb_rating_for_details(source, media_type, media_id, region):
         .first()
     )
     return get_tmdb_content_rating_display(item, region)
+
+
+@require_GET
+def tmdb_content_rating(request, source, media_type, media_id):
+    """Queue a missing TMDB rating and return the current badge fragment."""
+    if source != Sources.TMDB.value or media_type not in {
+        MediaTypes.MOVIE.value,
+        MediaTypes.TV.value,
+    }:
+        raise Http404
+    item = Item.objects.filter(
+        media_id=media_id, source=source, media_type=media_type
+    ).first()
+    region = getattr(request.user, "tmdb_content_rating_region", "UNSET")
+    rating = get_tmdb_content_rating_display(item, region)
+    waiting = item is not None and rating is None
+    if item is not None:
+        try:
+            rating_metadata = item.tmdb_content_rating_metadata
+        except TMDBContentRatingMetadata.DoesNotExist:
+            rating_metadata = None
+        rating_due = (
+            rating_metadata is None
+            or rating_metadata.synced_at is None
+            or rating_metadata.synced_at
+            < timezone.now() - TMDB_CONTENT_RATING_REFRESH_AFTER
+        )
+        retry_allowed = (
+            rating_metadata is None
+            or rating_metadata.last_attempted_at is None
+            or rating_metadata.last_attempted_at
+            < timezone.now() - TMDB_CONTENT_RATING_RETRY_AFTER
+            or (
+                rating_metadata.synced_at is not None
+                and rating_metadata.synced_at >= rating_metadata.last_attempted_at
+            )
+        )
+        if (
+            rating_metadata is not None
+            and rating_metadata.last_attempted_at is not None
+        ):
+            failed_recently = (
+                rating_metadata.synced_at is None
+                or rating_metadata.synced_at < rating_metadata.last_attempted_at
+            ) and not retry_allowed
+            waiting = rating is None and not failed_recently
+        if rating_due and retry_allowed:
+            lock_key = f"tmdb_content_rating_request_{item.pk}"
+            if cache.add(lock_key, "queued", timeout=120):
+                refresh_tmdb_content_ratings_for_items.delay([item.pk])
+    return render(
+        request,
+        "app/components/tmdb_content_rating.html",
+        {
+            "tmdb_content_rating": rating,
+            "rating_waiting": waiting,
+            "rating_initial": False,
+            "rating_region": region,
+            "source": source,
+            "media_type": media_type,
+            "media_id": media_id,
+        },
+    )
 
 
 def get_trakt_ratings_for_details(source, media_type, media_id, metadata):
@@ -1210,6 +1276,20 @@ def media_search(request):
 def media_details(request, source, media_type, media_id, title):  # noqa: ARG001 title for URL
     """Return the details page for a media item."""
     media_metadata = services.get_media_metadata(media_type, media_id, source)
+    if (
+        source == Sources.TMDB.value
+        and media_type in {MediaTypes.MOVIE.value, MediaTypes.TV.value}
+        and getattr(request.user, "tmdb_content_rating_region", "UNSET") != "UNSET"
+    ):
+        Item.objects.get_or_create(
+            media_id=media_id,
+            source=source,
+            media_type=media_type,
+            defaults={
+                "title": media_metadata["title"],
+                "image": media_metadata.get("image") or settings.IMG_NONE,
+            },
+        )
     user_medias = BasicMedia.objects.filter_media_prefetch(
         request.user,
         media_id,

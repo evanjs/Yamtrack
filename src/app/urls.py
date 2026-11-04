@@ -37,6 +37,11 @@ urlpatterns = [
     ),
     path("<str:username>/<media_type:media_type>", views.media_list, name="medialist"),
     path(
+        "details/<source:source>/<media_type:media_type>/<str:media_id>/content-rating",
+        views.tmdb_content_rating,
+        name="tmdb_content_rating",
+    ),
+    path(
         "details/<source:source>/<media_type:media_type>/<str:media_id>/<str:title>",
         views.media_details,
         name="media_details",
