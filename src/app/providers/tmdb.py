@@ -371,10 +371,10 @@ PERSON_CREDIT_SORTS = {
 }
 
 
-def search_people(query):
+def search_people(query, include_adult=False):
     """Search TMDB people and return normalized person choices."""
     query = query.strip()
-    cache_key = f"search_{Sources.TMDB.value}_person_{query}"
+    cache_key = f"search_{Sources.TMDB.value}_person_{query}_{include_adult}"
     data = cache.get(cache_key)
     if data is None:
         try:
@@ -382,7 +382,12 @@ def search_people(query):
                 Sources.TMDB.value,
                 "GET",
                 f"{base_url}/search/person",
-                params={**base_params, "query": query, "page": 1},
+                params={
+                    **base_params,
+                    "query": query,
+                    "page": 1,
+                    "include_adult": include_adult,
+                },
             )
         except requests.exceptions.HTTPError as error:
             handle_error(error)

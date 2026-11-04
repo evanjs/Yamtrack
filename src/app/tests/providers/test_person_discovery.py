@@ -46,6 +46,24 @@ class TMDBPersonDiscoveryTests(TestCase):
         self.assertEqual(kwargs["params"]["query"], "Jordan Peele")
 
     @patch("app.providers.services.api_request")
+    def test_search_people_passes_adult_setting_and_caches_per_setting(
+        self, mock_api_request
+    ):
+        """Adult and non-adult person searches use separate TMDB requests/cache."""
+        mock_api_request.return_value = {"results": []}
+
+        tmdb.search_people("Jordan Peele", include_adult=False)
+        tmdb.search_people("Jordan Peele", include_adult=True)
+
+        self.assertEqual(mock_api_request.call_count, 2)
+        self.assertFalse(
+            mock_api_request.call_args_list[0].kwargs["params"]["include_adult"]
+        )
+        self.assertTrue(
+            mock_api_request.call_args_list[1].kwargs["params"]["include_adult"]
+        )
+
+    @patch("app.providers.services.api_request")
     def test_person_movie_credits_filters_role_and_labels_cast(self, mock_api_request):
         """Filter credits by exact role and show cast character labels."""
         mock_api_request.return_value = {

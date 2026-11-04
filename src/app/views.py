@@ -471,6 +471,11 @@ def _sort_person_credits(credits, sort):
 def discover_by_person(request):
     """Search TMDB people or browse movie and TV credits for one person."""
     query = request.GET.get("q", "").strip()
+    include_adult = (
+        "include_adult" in request.GET
+        if "adult_filter" in request.GET
+        else request.user.show_adult_titles
+    )
     person_id = request.GET.get("person_id", "").strip()
     person_name = request.GET.get("person_name", "").strip()[:200]
     media_type = request.GET.get("media_type", "both").strip().casefold()
@@ -497,13 +502,14 @@ def discover_by_person(request):
         person_id = ""
         person_name = ""
         if len(query) >= TMDB_CREDIT_SEARCH_MIN_LENGTH:
-            people = tmdb.search_people(query)
+            people = tmdb.search_people(query, include_adult=include_adult)
 
     return render(
         request,
         "app/discover_by_person.html",
         {
             "query": query,
+            "include_adult": include_adult,
             "people": people,
             "credits": movie_results,
             "tv_credits": tv_results,
@@ -534,6 +540,11 @@ def discover_by_person(request):
 def discover_tv_by_person(request):
     """Search TMDB people or browse one person's TV credits."""
     query = request.GET.get("q", "").strip()
+    include_adult = (
+        "include_adult" in request.GET
+        if "adult_filter" in request.GET
+        else request.user.show_adult_titles
+    )
     person_id = request.GET.get("person_id", "").strip()
     person_name = request.GET.get("person_name", "").strip()[:200]
     role = request.GET.get("role", "all").strip().casefold()
@@ -574,13 +585,14 @@ def discover_tv_by_person(request):
         person_id = ""
         person_name = ""
         if len(query) >= TMDB_CREDIT_SEARCH_MIN_LENGTH:
-            people = tmdb.search_people(query)
+            people = tmdb.search_people(query, include_adult=include_adult)
 
     return render(
         request,
         "app/discover_tv_by_person.html",
         {
             "query": query,
+            "include_adult": include_adult,
             "people": people,
             "credits": credits,
             "person_id": person_id,

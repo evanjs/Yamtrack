@@ -155,7 +155,39 @@ class PersonDiscoveryViewTests(TestCase):
         self.assertContains(response, "Discover by person")
         self.assertContains(response, "width: 3rem;")
         self.assertContains(response, "flex: 0 0 3rem;")
-        mock_search_people.assert_called_once_with("Jordan Peele")
+        mock_search_people.assert_called_once_with("Jordan Peele", include_adult=True)
+
+    @patch("app.providers.tmdb.search_people", return_value=[])
+    def test_person_search_checkbox_overrides_user_preference(self, mock_search_people):
+        """An unchecked adult toggle overrides the saved preference."""
+        response = self.client.get(
+            reverse("discover_by_person"),
+            {"q": "Jordan Peele", "adult_filter": "1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["include_adult"])
+        self.assertContains(response, 'name="include_adult"')
+        mock_search_people.assert_called_once_with(
+            "Jordan Peele", include_adult=False
+        )
+
+    @patch("app.providers.tmdb.search_people", return_value=[])
+    def test_tv_person_search_uses_saved_adult_preference(self, mock_search_people):
+        """The TV person search defaults the toggle from the user preference."""
+        user = get_user_model().objects.get(username=self.credentials["username"])
+        user.show_adult_titles = False
+        user.save(update_fields=["show_adult_titles"])
+
+        response = self.client.get(
+            reverse("discover_tv_by_person"), {"q": "Jordan Peele"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["include_adult"])
+        mock_search_people.assert_called_once_with(
+            "Jordan Peele", include_adult=False
+        )
 
     @patch(
         "app.providers.tmdb.person_details",
