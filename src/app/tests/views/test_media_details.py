@@ -16,6 +16,7 @@ from app.models import (
     Status,
     SteamAppMapping,
     SteamAppRating,
+    SteamDBHltbMapping,
 )
 
 
@@ -278,6 +279,92 @@ class MediaDetailsViewTests(TestCase):
             "https://trakt.tv/movies/test-movie",
             MediaTypes.MOVIE.value,
         )
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_game_details_include_hltb_link_from_persisted_steamdb_mapping(
+        self,
+        mock_get_metadata,
+    ):
+        """Add the HLTB link in Details when the Steam AppID is mapped."""
+        SteamDBHltbMapping.objects.create(
+            steam_app_id="292030",
+            hltb_id="71481",
+            synced_at="2026-11-04T00:00:00Z",
+        )
+        mock_get_metadata.return_value = {
+            "media_id": "777",
+            "title": "Rated Game",
+            "media_type": MediaTypes.GAME.value,
+            "source": Sources.IGDB.value,
+            "image": "https://example.com/game.jpg",
+            "details": {"format": "Game"},
+            "genres": [],
+            "screenshots": [],
+            "steam_app_id": "292030",
+            "external_links": {"Steam": "https://store.steampowered.com/app/292030/"},
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.IGDB.value,
+                    "media_type": MediaTypes.GAME.value,
+                    "media_id": "777",
+                    "title": "rated-game",
+                },
+            ),
+        )
+
+        expected = "https://howlongtobeat.com/game/71481"
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["media"]["external_links"]["HowLongToBeat"],
+            expected,
+        )
+        self.assertContains(response, f'href="{expected}"')
+        self.assertContains(response, ">HowLongToBeat</a>")
+        self.assertNotIn(
+            "HowLongToBeat",
+            mock_get_metadata.return_value["external_links"],
+        )
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_game_details_omit_hltb_link_without_persisted_mapping(
+        self,
+        mock_get_metadata,
+    ):
+        """Do not fabricate an HLTB link when no AppID mapping is stored."""
+        mock_get_metadata.return_value = {
+            "media_id": "778",
+            "title": "Unmapped Game",
+            "media_type": MediaTypes.GAME.value,
+            "source": Sources.IGDB.value,
+            "image": "https://example.com/game.jpg",
+            "details": {"format": "Game"},
+            "genres": [],
+            "screenshots": [],
+            "steam_app_id": "999999",
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.IGDB.value,
+                    "media_type": MediaTypes.GAME.value,
+                    "media_id": "778",
+                    "title": "unmapped-game",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(
+            "HowLongToBeat",
+            response.context["media"].get("external_links", {}),
+        )
+        self.assertNotContains(response, "howlongtobeat.com")
 
     @patch(
         "app.providers.protondb.summary",

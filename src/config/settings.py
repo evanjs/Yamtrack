@@ -595,6 +595,10 @@ USER_MESSAGE_RETENTION_DAYS = config(
     cast=int,
 )
 CELERY_BEAT_SCHEDULE = {
+    "refresh_steamdb_hltb_mappings": {
+        "task": "Refresh SteamDB HLTB mappings",
+        "schedule": 60 * 60 * 24,  # daily
+    },
     "reload_calendar": {
         "task": "Reload calendar",
         "schedule": 60 * 60 * 24,  # every 24 hours

@@ -1,9 +1,12 @@
 import logging
+import tempfile
 from datetime import timedelta
+from pathlib import Path
 
 import requests
 from celery import shared_task
 from django.conf import settings
+from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
@@ -30,6 +33,7 @@ from app.models import (
     Sources,
     SteamAppMapping,
     SteamAppRating,
+    SteamDBHltbMapping,
     TMDBContentRatingMetadata,
     TMDBMovieCredit,
     TMDBMovieMetadata,
@@ -39,9 +43,38 @@ from app.models import (
     tmdb_metadata_refresh_cutoff,
     tmdb_metadata_retry_cutoff,
 )
-from app.providers import igdb, services, steam, tmdb
+from app.providers import igdb, services, steam, steamdb, tmdb
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(name="Refresh SteamDB HLTB mappings")
+def refresh_steamdb_hltb_mappings(url=None):
+    """Fetch and atomically replace shared SteamDB HLTB mappings."""
+    with tempfile.TemporaryDirectory(prefix="yamtrack-steamdb-") as directory:
+        dump_path = Path(directory) / "steamdb.json.gz"
+        steamdb.download_dump(url or steamdb.STEAMDB_DUMP_URL, dump_path)
+        index = steamdb.load_hltb_index(dump_path)
+
+    if not index:
+        msg = (
+            "SteamDB snapshot contained no valid HLTB mappings; "
+            "preserving existing data."
+        )
+        raise ValueError(msg)
+
+    synced_at = timezone.now()
+    rows = [
+        SteamDBHltbMapping(steam_app_id=app_id, hltb_id=hltb_id, synced_at=synced_at)
+        for app_id, hltb_id in index.items()
+    ]
+    with transaction.atomic():
+        SteamDBHltbMapping.objects.all().delete()
+        SteamDBHltbMapping.objects.bulk_create(rows, batch_size=2000)
+
+    result = {"mappings": len(rows), "synced_at": synced_at.isoformat()}
+    logger.info("Refreshed %s SteamDB HLTB mappings", len(rows))
+    return result
 
 
 @shared_task(name="Cleanup user messages")

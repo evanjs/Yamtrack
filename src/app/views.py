@@ -48,6 +48,7 @@ from app.models import (
     Season,
     Sources,
     Status,
+    SteamDBHltbMapping,
     TMDBContentRatingMetadata,
     TMDBMovieCredit,
     TMDBMovieCreditAssignment,
@@ -69,6 +70,35 @@ from users.models import (
 
 logger = logging.getLogger(__name__)
 TMDB_CREDIT_SEARCH_MIN_LENGTH = 2
+
+
+def get_hltb_external_link(source, media_type, metadata):
+    """Return the persisted HLTB destination when the game's Steam ID maps."""
+    if source != Sources.IGDB.value or media_type != MediaTypes.GAME.value:
+        return None
+    steam_app_id = metadata.get("steam_app_id")
+    if not steam_app_id:
+        return None
+    hltb_id = SteamDBHltbMapping.objects.filter(
+        steam_app_id=str(steam_app_id),
+    ).values_list("hltb_id", flat=True).first()
+    if not hltb_id:
+        return None
+    return f"https://howlongtobeat.com/game/{hltb_id}"
+
+
+def add_hltb_external_link(source, media_type, metadata):
+    """Add a stored HLTB destination without mutating cached provider metadata."""
+    hltb_url = get_hltb_external_link(source, media_type, metadata)
+    if not hltb_url:
+        return metadata
+    return {
+        **metadata,
+        "external_links": {
+            **(metadata.get("external_links") or {}),
+            "HowLongToBeat": hltb_url,
+        },
+    }
 
 
 def get_protondb_summary(source, media_type, metadata):
@@ -1290,6 +1320,8 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
                 "image": media_metadata.get("image") or settings.IMG_NONE,
             },
         )
+    media_metadata = add_hltb_external_link(source, media_type, media_metadata)
+
     user_medias = BasicMedia.objects.filter_media_prefetch(
         request.user,
         media_id,

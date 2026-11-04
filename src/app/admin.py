@@ -66,6 +66,7 @@ SpecialModels = [
     "IGDBGameMetadata",
     "SteamAppRating",
     "SteamAppMapping",
+    "SteamDBHltbMapping",
     "IGDBGameTaxonomy",
     "IGDBGameTaxonomyAssignment",
     "TMDBMovieMetadata",

@@ -301,6 +301,23 @@ class IGDBGameMetadata(models.Model):
         return f"IGDB metadata for {self.item}"
 
 
+class SteamDBHltbMapping(models.Model):
+    """Shared SteamDB mapping from Steam AppID to HowLongToBeat game ID."""
+
+    steam_app_id = models.CharField(max_length=20, primary_key=True)
+    hltb_id = models.CharField(max_length=20)
+    synced_at = models.DateTimeField()
+
+    class Meta:
+        """Model options for SteamDB HLTB mappings."""
+
+        indexes = [models.Index(fields=["hltb_id"])]
+
+    def __str__(self):
+        """Return the AppID-to-HLTB mapping."""
+        return f"SteamDB HLTB mapping {self.steam_app_id} → {self.hltb_id}"
+
+
 class SteamAppRating(models.Model):
     """Persist regional Steam Store ratings for one verified App ID."""
 
