@@ -6,9 +6,9 @@ from app.tasks import refresh_steamdb_hltb_mappings
 
 
 class Command(BaseCommand):
-    """Refresh the shared SteamDB HLTB lookup table immediately."""
+    """Refresh the shared SteamDB lookup and game metadata immediately."""
 
-    help = "Download and persist SteamDB HLTB mappings."
+    help = "Download and persist SteamDB game metadata and HLTB mappings."
 
     def add_arguments(self, parser):
         """Add an optional source URL override."""

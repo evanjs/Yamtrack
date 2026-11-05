@@ -33,6 +33,7 @@ from app.models import (
     Sources,
     SteamAppMapping,
     SteamAppRating,
+    SteamDBGameMetadata,
     SteamDBHltbMapping,
     TMDBContentRatingMetadata,
     TMDBMovieCredit,
@@ -50,30 +51,55 @@ logger = logging.getLogger(__name__)
 
 @shared_task(name="Refresh SteamDB HLTB mappings")
 def refresh_steamdb_hltb_mappings(url=None):
-    """Fetch and atomically replace shared SteamDB HLTB mappings."""
+    """Fetch and atomically replace selected shared SteamDB game metadata."""
     with tempfile.TemporaryDirectory(prefix="yamtrack-steamdb-") as directory:
         dump_path = Path(directory) / "steamdb.json.gz"
         steamdb.download_dump(url or steamdb.STEAMDB_DUMP_URL, dump_path)
-        index = steamdb.load_hltb_index(dump_path)
+        index = steamdb.load_steamdb_index(dump_path)
 
     if not index:
         msg = (
-            "SteamDB snapshot contained no valid HLTB mappings; "
+            "SteamDB snapshot contained no valid Steam AppIDs; "
             "preserving existing data."
         )
         raise ValueError(msg)
 
     synced_at = timezone.now()
-    rows = [
-        SteamDBHltbMapping(steam_app_id=app_id, hltb_id=hltb_id, synced_at=synced_at)
-        for app_id, hltb_id in index.items()
+    hltb_rows = []
+    for app_id, metadata in index.items():
+        hltb_id = steamdb.parse_hltb_id(metadata.get("hltb_url"))
+        if hltb_id:
+            hltb_rows.append(
+                SteamDBHltbMapping(
+                    steam_app_id=app_id,
+                    hltb_id=hltb_id,
+                    synced_at=synced_at,
+                ),
+            )
+    metadata_rows = [
+        SteamDBGameMetadata(
+            steam_app_id=app_id,
+            metadata=metadata,
+            synced_at=synced_at,
+        )
+        for app_id, metadata in index.items()
     ]
     with transaction.atomic():
         SteamDBHltbMapping.objects.all().delete()
-        SteamDBHltbMapping.objects.bulk_create(rows, batch_size=2000)
+        SteamDBHltbMapping.objects.bulk_create(hltb_rows, batch_size=2000)
+        SteamDBGameMetadata.objects.all().delete()
+        SteamDBGameMetadata.objects.bulk_create(metadata_rows, batch_size=2000)
 
-    result = {"mappings": len(rows), "synced_at": synced_at.isoformat()}
-    logger.info("Refreshed %s SteamDB HLTB mappings", len(rows))
+    result = {
+        "mappings": len(hltb_rows),
+        "steamdb_games": len(metadata_rows),
+        "synced_at": synced_at.isoformat(),
+    }
+    logger.info(
+        "Refreshed %s SteamDB game records (%s HLTB mappings)",
+        len(metadata_rows),
+        len(hltb_rows),
+    )
     return result
 
 

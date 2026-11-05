@@ -16,8 +16,10 @@ from app.models import (
     Status,
     SteamAppMapping,
     SteamAppRating,
+    SteamDBGameMetadata,
     SteamDBHltbMapping,
 )
+from app.views import get_steam_review_summary
 
 
 class MediaDetailsViewTests(TestCase):
@@ -28,6 +30,114 @@ class MediaDetailsViewTests(TestCase):
         self.credentials = {"username": "test", "password": "12345"}
         self.user = get_user_model().objects.create_user(**self.credentials)
         self.client.login(**self.credentials)
+
+    @patch("app.views.get_protondb_summary", return_value={
+        "tier": "gold",
+        "trending_tier": None,
+        "banner_color": "#ffffff",
+        "confidence": None,
+        "total": 1,
+    })
+    @patch("app.providers.services.get_media_metadata")
+    def test_game_details_show_steam_review_summary_when_available(
+        self, mock_metadata, _mock_protondb_summary
+    ):
+        """SteamDB review label and count render with Steam's positive color."""
+        item = Item.objects.create(
+            media_id="7777",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Review Game",
+        )
+        SteamAppMapping.objects.create(item=item, app_ids=["292030"])
+        SteamAppRating.objects.create(
+            item=item,
+            steam_app_id="292030",
+            ratings={"esrb": {"rating": "m"}},
+        )
+        self.user.steam_rating_agency = "esrb"
+        self.user.save(update_fields=["steam_rating_agency"])
+        SteamDBGameMetadata.objects.create(
+            steam_app_id="292030",
+            metadata={
+                "steam_reviews_label": "Very Positive",
+                "steam_reviews_count": 388,
+                "steam_url": "https://store.steampowered.com/app/292030/",
+            },
+        )
+        mock_metadata.return_value = {
+            "media_id": "7777",
+            "title": "Review Game",
+            "media_type": MediaTypes.GAME.value,
+            "source": Sources.IGDB.value,
+            "steam_app_id": "292030",
+            "score": 8.2,
+            "score_count": 100,
+            "genres": [],
+            "screenshots": [],
+            "age_ratings": [],
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.IGDB.value,
+                    "media_type": MediaTypes.GAME.value,
+                    "media_id": "7777",
+                    "title": "review-game",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ALL REVIEWS:")
+        self.assertContains(response, "Very Positive")
+        self.assertContains(response, "(388)")
+        self.assertContains(response, "#66c0f4")
+        self.assertContains(
+            response,
+            "https://store.steampowered.com/app/292030/#app_reviews_hash",
+        )
+        rendered = response.content.decode()
+        self.assertLess(
+            rendered.index("IGDB SCORE"),
+            rendered.index('aria-label="Steam reviews"'),
+        )
+        self.assertLess(
+            rendered.index('aria-label="Steam reviews"'),
+            rendered.index('aria-label="Content rating"'),
+        )
+        self.assertLess(
+            rendered.index('aria-label="Content rating"'),
+            rendered.index('aria-label="Compatibility"'),
+        )
+
+    def test_steam_review_labels_use_steam_review_category_colors(self):
+        """Negative, mixed and positive variants use Steam's category colors."""
+        item = Item.objects.create(
+            media_id="7788",
+            source=Sources.IGDB.value,
+            media_type=MediaTypes.GAME.value,
+            title="Color Test Game",
+        )
+        SteamAppMapping.objects.create(item=item, app_ids=["292030"])
+        record = SteamDBGameMetadata.objects.create(
+            steam_app_id="292030",
+            metadata={"steam_reviews_label": "Overwhelmingly Positive"},
+        )
+
+        for label, color in (
+            ("Mostly Negative", "#a34c25"),
+            ("Mixed", "#b9a074"),
+            ("Positive", "#66c0f4"),
+            ("Very Positive", "#66c0f4"),
+            ("Overwhelmingly Positive", "#66c0f4"),
+        ):
+            with self.subTest(label=label):
+                record.metadata = {"steam_reviews_label": label}
+                record.save(update_fields=["metadata"])
+                self.assertEqual(get_steam_review_summary(item)["color"], color)
 
     @patch("app.views.refresh_tmdb_content_ratings_for_items.delay")
     @patch("app.providers.services.get_media_metadata")

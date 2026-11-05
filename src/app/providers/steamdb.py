@@ -11,6 +11,63 @@ STEAMDB_DUMP_URL = (
 )
 
 _HLTB_ID = re.compile(r"^/game/(\d+)/?$")
+_STEAM_APP_ID_MAX_LENGTH = 20
+_CATALOG_FIELDS = (
+    "id",
+    "kind",
+    "name",
+    "steam_url",
+    "gog_id",
+    "gog_url",
+    "hltb_url",
+    "platforms",
+    "developers",
+    "publishers",
+    "languages",
+    "voiceovers",
+    "categories",
+    "genres",
+    "tags",
+    "achievements",
+    "steam_reviews_percent",
+    "steam_reviews_count",
+    "steam_reviews_label",
+    "steam_recent_percent",
+    "steam_recent_count",
+    "steam_recent_label",
+    "updated_at",
+)
+
+
+def load_steamdb_index(path):
+    """Load selected SteamDB catalog metadata indexed by valid Steam AppID."""
+    path = Path(path)
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8") as dump:
+        records = json.load(dump)
+
+    if not isinstance(records, list):
+        msg = "SteamDB dump must be a JSON array."
+        raise TypeError(msg)
+
+    index = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        app_id = record.get("steam_appid")
+        if not isinstance(app_id, (int, str)) or isinstance(app_id, bool):
+            continue
+        app_id = str(app_id)
+        if (
+            not app_id.isdecimal()
+            or int(app_id) <= 0
+            or len(app_id) > _STEAM_APP_ID_MAX_LENGTH
+        ):
+            continue
+        metadata = {field: record.get(field) for field in _CATALOG_FIELDS}
+        metadata["steam_appid"] = app_id
+        index[app_id] = metadata
+    return index
 
 
 def load_hltb_index(path):
@@ -33,16 +90,31 @@ def load_hltb_index(path):
         if not isinstance(app_id, (int, str)) or isinstance(app_id, bool):
             continue
         app_id = str(app_id)
-        if not app_id.isdecimal() or int(app_id) <= 0 or not isinstance(link, str):
+        if (
+            not app_id.isdecimal()
+            or int(app_id) <= 0
+            or len(app_id) > _STEAM_APP_ID_MAX_LENGTH
+            or not isinstance(link, str)
+        ):
             continue
-        parsed = urlparse(link)
-        match = _HLTB_ID.fullmatch(parsed.path)
-        if parsed.scheme == "https" and parsed.netloc in {
-            "howlongtobeat.com",
-            "www.howlongtobeat.com",
-        } and match:
-            index[app_id] = match.group(1)
+        hltb_id = parse_hltb_id(link)
+        if hltb_id:
+            index[app_id] = hltb_id
     return index
+
+
+def parse_hltb_id(link):
+    """Return a validated HLTB game ID from a canonical HLTB URL."""
+    if not isinstance(link, str):
+        return None
+    parsed = urlparse(link)
+    match = _HLTB_ID.fullmatch(parsed.path)
+    if parsed.scheme == "https" and parsed.netloc in {
+        "howlongtobeat.com",
+        "www.howlongtobeat.com",
+    } and match:
+        return match.group(1)
+    return None
 
 
 def download_dump(url, destination):

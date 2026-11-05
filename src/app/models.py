@@ -318,6 +318,18 @@ class SteamDBHltbMapping(models.Model):
         return f"SteamDB HLTB mapping {self.steam_app_id} → {self.hltb_id}"
 
 
+class SteamDBGameMetadata(models.Model):
+    """Store selected shared SteamDB fields for one Steam App ID."""
+
+    steam_app_id = models.CharField(max_length=20, primary_key=True)
+    metadata = models.JSONField(default=dict)
+    synced_at = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        """Return the Steam AppID for this shared metadata record."""
+        return f"SteamDB metadata for {self.steam_app_id}"
+
+
 class SteamAppRating(models.Model):
     """Persist regional Steam Store ratings for one verified App ID."""
 

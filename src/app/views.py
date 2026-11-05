@@ -2,7 +2,7 @@ import csv
 import logging
 from datetime import date
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from django.apps import apps
 from django.conf import settings
@@ -48,6 +48,7 @@ from app.models import (
     Season,
     Sources,
     Status,
+    SteamDBGameMetadata,
     SteamDBHltbMapping,
     TMDBContentRatingMetadata,
     TMDBMovieCredit,
@@ -107,6 +108,52 @@ def get_protondb_summary(source, media_type, metadata):
         return None
     steam_app_id = metadata.get("steam_app_id")
     return protondb.summary(steam_app_id) if steam_app_id else None
+
+
+def get_steam_review_summary(item):
+    """Return the persisted SteamDB review summary for an IGDB game Item."""
+    if (
+        item is None
+        or item.source != Sources.IGDB.value
+        or item.media_type != MediaTypes.GAME.value
+    ):
+        return None
+    mapping = getattr(item, "steam_app_mapping", None)
+    if not mapping or not mapping.app_ids:
+        return None
+    records = SteamDBGameMetadata.objects.in_bulk(mapping.app_ids)
+    for app_id in mapping.app_ids:
+        record = records.get(str(app_id))
+        metadata = record.metadata if record else {}
+        label = metadata.get("steam_reviews_label")
+        if not isinstance(label, str) or not label:
+            continue
+        normalized = label.casefold()
+        if "negative" in normalized:
+            color = "#a34c25"
+        elif "mixed" in normalized:
+            color = "#b9a074"
+        elif "positive" in normalized:
+            color = "#66c0f4"
+        else:
+            continue
+        url = metadata.get("steam_url")
+        parsed = urlparse(url) if isinstance(url, str) else None
+        if (
+            not parsed
+            or parsed.scheme != "https"
+            or parsed.netloc != "store.steampowered.com"
+        ):
+            url = None
+        else:
+            url = parsed._replace(fragment="app_reviews_hash").geturl()
+        return {
+            "label": label,
+            "count": metadata.get("steam_reviews_count"),
+            "color": color,
+            "url": url,
+        }
+    return None
 
 
 def _persist_igdb_taxonomies_for_item(item, metadata):
@@ -1368,6 +1415,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
     steam_rating = None
     steam_rating_art = None
     steam_rating_icon = None
+    steam_review_summary = None
     protondb_summary = get_protondb_summary(source, media_type, media_metadata)
     if source == Sources.IGDB.value and media_type == MediaTypes.GAME.value:
         steam_item = (
@@ -1381,6 +1429,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
             .first()
         )
         if steam_item:
+            steam_review_summary = get_steam_review_summary(steam_item)
             steam_rating_agency = getattr(
                 request.user,
                 "steam_rating_agency",
@@ -1424,6 +1473,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         ),
         "steam_rating_art": steam_rating_art,
         "steam_rating_icon": steam_rating_icon,
+        "steam_review_summary": steam_review_summary,
         "protondb_summary": protondb_summary,
     }
     return render(request, "app/media_details.html", context)
