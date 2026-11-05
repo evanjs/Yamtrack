@@ -1311,7 +1311,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         and media_type in {MediaTypes.MOVIE.value, MediaTypes.TV.value}
         and getattr(request.user, "tmdb_content_rating_region", "UNSET") != "UNSET"
     ):
-        Item.objects.get_or_create(
+        item, _created = Item.objects.get_or_create(
             media_id=media_id,
             source=source,
             media_type=media_type,
@@ -1320,6 +1320,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
                 "image": media_metadata.get("image") or settings.IMG_NONE,
             },
         )
+        _persist_tmdb_content_ratings_for_item(item, media_metadata)
     media_metadata = add_hltb_external_link(source, media_type, media_metadata)
 
     user_medias = BasicMedia.objects.filter_media_prefetch(

@@ -31,10 +31,10 @@ class MediaDetailsViewTests(TestCase):
 
     @patch("app.views.refresh_tmdb_content_ratings_for_items.delay")
     @patch("app.providers.services.get_media_metadata")
-    def test_untracked_tmdb_detail_visit_creates_item_and_queues_rating(
+    def test_untracked_tmdb_detail_visit_persists_embedded_rating(
         self, mock_get_metadata, mock_refresh
     ):
-        """A configured rating preference hydrates an untracked detail visit."""
+        """An embedded certification is saved instead of re-fetched."""
         self.user.tmdb_content_rating_region = "US"
         self.user.save(update_fields=["tmdb_content_rating_region"])
         mock_get_metadata.return_value = {
@@ -43,6 +43,9 @@ class MediaDetailsViewTests(TestCase):
             "media_type": "movie",
             "source": "tmdb",
             "image": "https://example.com/untracked.jpg",
+            "tmdb_movie_ratings": {
+                "US": [{"certification": "PG-13", "type": 3}]
+            },
         }
 
         response = self.client.get(
@@ -57,9 +60,12 @@ class MediaDetailsViewTests(TestCase):
             )
         )
         item = Item.objects.get(source="tmdb", media_type="movie", media_id="7654")
+        self.assertEqual(
+            item.tmdb_content_rating_metadata.ratings,
+            {"US": [{"certification": "PG-13", "type": 3}]},
+        )
         self.assertContains(response, 'hx-trigger="load"')
-        cache.delete(f"tmdb_content_rating_request_{item.pk}")
-        self.client.get(
+        rating_response = self.client.get(
             reverse(
                 "tmdb_content_rating",
                 kwargs={
@@ -69,7 +75,8 @@ class MediaDetailsViewTests(TestCase):
                 },
             )
         )
-        mock_refresh.assert_called_once_with([item.pk])
+        self.assertContains(rating_response, "US · PG-13")
+        mock_refresh.assert_not_called()
         self.assertFalse(Movie.objects.filter(item=item, user=self.user).exists())
 
     @patch("app.views.refresh_tmdb_content_ratings_for_items.delay")
