@@ -47,6 +47,9 @@ test('import body trims the username and defaults to a one-time import', () => {
   assert.deepEqual(importBody({ username: 'a', mode: 'new', frequency: 'daily', time: '03:00' }), {
     user: 'a', mode: 'new', frequency: 'daily', time: '03:00',
   });
+  assert.deepEqual(importBody({ private: true, mode: 'overwrite' }), {
+    private: true, mode: 'overwrite', frequency: 'once',
+  });
 });
 
 test('credentials body omits blank fields so saved values are kept', () => {

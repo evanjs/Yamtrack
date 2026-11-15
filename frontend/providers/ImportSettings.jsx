@@ -276,13 +276,23 @@ export function ImportSettings({
         <Text style={[styles.copy, { color: colors.textSecondary }]}>{labels.privateRequires}</Text>
         <Button label={labels.configure} tone="surface" onPress={onConfigure} palette={buttons} />
       </View> : <>
-        {!privateImport ? <TextField id="import-username" name="user" label={labels.username}
+        {!privateImport ? (model.compactUsernameImport ? <View style={styles.usernameRow}>
+          <View style={styles.usernameInput}>
+            <TextField id="import-username" name="user" label={labels.username} labelHidden
+              accessibilityLabel={labels.username} value={username} required
+              placeholder={labels.usernamePlaceholder} palette={colors}
+              onChangeText={next => { setUsername(next); setNotice(''); setError(''); }} />
+          </View>
+          <Button label={pending ? labels.importing : labels.import} busy={pending}
+            disabled={pending || blocked} onPress={submit} palette={buttons} />
+        </View> : <TextField id="import-username" name="user" label={labels.username}
           value={username} required placeholder={labels.usernamePlaceholder} palette={colors}
-          onChangeText={next => { setUsername(next); setNotice(''); setError(''); }} /> : null}
-        <View style={styles.actions}>
+          onChangeText={next => { setUsername(next); setNotice(''); setError(''); }} />)
+          : model.privateAccountCopy ? <Text style={[styles.copy, { color: colors.textMuted }]}>{model.privateAccountCopy}</Text> : null}
+        {!model.compactUsernameImport || privateImport ? <View style={styles.actions}>
           <Button label={pending ? labels.importing : labels.import} busy={pending} width="full"
             disabled={pending || blocked} onPress={submit} palette={buttons} />
-        </View>
+        </View> : null}
       </>}
       {blocked ? <Text style={[styles.copy, { color: colors.textMuted }]}>{model.modeUnsupported || labels.modeUnsupported}</Text> : null}
       {notice ? <Text accessibilityLiveRegion="polite" style={[styles.copy, { color: colors.success }]}>{notice}</Text> : null}
@@ -302,4 +312,6 @@ const styles = StyleSheet.create({
   copy: { fontSize: 12, lineHeight: 17 },
   notice: { gap: 8, borderWidth: 1, borderRadius: 8, padding: 10 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  usernameRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 0 },
+  usernameInput: { flex: 1, minWidth: 0 },
 });

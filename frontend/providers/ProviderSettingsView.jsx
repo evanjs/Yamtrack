@@ -160,6 +160,8 @@ export function importSettingsModel(imports, pageLabels = {}) {
     description: imports.description || translated(labels, 'Import anime and manga from your AniList profile.'),
     configured: Boolean(imports.configured),
     privateImport: Boolean(imports.privateImport),
+    privateAccountCopy: imports.privateAccountCopy || '',
+    compactUsernameImport: Boolean(imports.compactUsernameImport),
     username: imports.username,
     modeUnsupported: imports.modeUnsupported
       || translated(labels, 'This import mode is not supported by AniList.')

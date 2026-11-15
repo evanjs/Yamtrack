@@ -583,7 +583,11 @@ def provider_page(request, provider, tab, credential_context=None):
     """Build safe browser props. Saved credential values/previews are never serialized."""
     user = request.user
     base = reverse("provider_detail", args=[provider["slug"]])
-    react_content = tab in {"overview", "metadata"} or provider["slug"] == "anilist"
+    react_content = (
+        tab in {"overview", "metadata"}
+        or provider["slug"] == "anilist"
+        or (provider["slug"] == "mal" and tab == "import")
+    )
     page = {
         "provider": {"label": provider["label"], "description": provider["description"],
                      "logo": SOURCES_CONFIG.get(provider.get("logo_slug") or provider["slug"], {}).get("logo"), "media": provider["media_labels"]},
@@ -631,13 +635,57 @@ def provider_page(request, provider, tab, credential_context=None):
         provider = context["metadata_provider"]
         page["credentials"] = provider_credentials(request, context)
     elif tab == "import":
-        configured = credentials.is_configured("anilist", user)
-        preferences = import_preferences(request, "anilist")
-        page["labels"].update(preferences["labels"])
-        page["imports"] = {
-            **preferences, "configured": configured,
-            "publicUrl": reverse("import_anilist_public"), "privateUrl": reverse("import_anilist_oauth") if configured else "",
-        }
+        if provider["slug"] == "anilist":
+            configured = credentials.is_configured("anilist", user)
+            preferences = import_preferences(request, "anilist")
+            page["labels"].update(preferences["labels"])
+            page["imports"] = {
+                **preferences, "configured": configured,
+                "publicUrl": reverse("import_anilist_public"), "privateUrl": reverse("import_anilist_oauth") if configured else "",
+            }
+        elif provider["slug"] == "mal":
+            account = (credential_context or {}).get("mal_account")
+            connected = bool(account and account.is_connected)
+            preferences = import_preferences(request, "mal")
+            page["labels"].update(preferences["labels"])
+            page["labels"].update({text: _(text) for text in (
+                "Import public list", "Import private list", "Public MyAnimeList username",
+                "Import from your connected MyAnimeList account.",
+                "Connect your MyAnimeList account to import a private list.",
+                "Connect MyAnimeList", "The private import uses the connected account; no username is needed.",
+            )})
+            page["imports"] = {
+                **preferences,
+                "configured": connected,
+                "privateImport": False,
+                "compactUsernameImport": True,
+                "heading": _("Import settings"),
+                "description": _("Import anime and manga"),
+                "publicUrl": reverse("import_mal"),
+                "privateUrl": reverse("import_mal"),
+                "privateAccountCopy": _(
+                    "Private list from your connected MyAnimeList account; no username is needed."
+                ),
+                "panelLabels": {
+                    "importSource": _("List visibility"),
+                    "publicList": _("Public list"),
+                    "privateList": _("Private list"),
+                    "privateAccountCopy": _(
+                        "Private list from your connected MyAnimeList account; no username is needed."
+                    ),
+                    "usernameLabel": _("Public MyAnimeList username"),
+                },
+                "labels": {
+                    **preferences["labels"],
+                    "publicLabel": _("Public list"),
+                    "privateLabel": _("Private list"),
+                    "username": _("Public MyAnimeList username"),
+                    "usernamePlaceholder": _("MAL username"),
+                    "privateRequires": _("Connect your MyAnimeList account to import a private list."),
+                    "configure": _("Connect MyAnimeList"),
+                    "description": _("Import anime and manga from a public username or your connected private list."),
+                },
+            }
     return page
 
 

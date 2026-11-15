@@ -20,11 +20,11 @@
   {% endif %}
   {% if not mal_account or not mal_account.is_connected %}
   {% if mal_sync_configured %}
-    <p class="text-sm text-[var(--color-text-muted)]">{% translate "This authorizes outgoing writes and enables automatic status, progress and score updates. Adding API credentials alone does not enable sync." %}</p>
+    <p class="text-sm text-[var(--color-text-muted)]">{% translate "Connect your MyAnimeList account to import private lists. Outgoing sync stays off until you enable it on the Sync tab." %}</p>
     <form method="post" action="{% url 'mal_oauth' %}">
       {% csrf_token %}
       <input type="hidden" name="next" value="{{ request.path }}?tab=connection">
-      {% button _("Authorize and enable MyAnimeList sync") submit=True %}
+      {% button _("Connect MyAnimeList account") submit=True %}
     </form>
   {% else %}
     <p class="text-sm text-[var(--color-text-muted)]">{% translate "Add a MyAnimeList Client ID and Client secret to enable account authorization." %}</p>

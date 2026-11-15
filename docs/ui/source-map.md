@@ -962,6 +962,9 @@ Status: `Partial / coexisting`
 Provider account state and bundled keys: `provider_ui._connection_card` and `provider_catalog.provider_state` (`account_linkable`) split a linked account from credentials; `credentials.ProviderCredentialSpec.bundled_only` (WeTrakr) hides every key surface. `mountAccountConnection` mounts the shared `ProviderLinkCard` device-code flow for WeTrakr through `transport.web.linkRequest` (replacing the Alpine connect box in `wetrakr_sync.html`), `ProviderLinkCard.initialDevice` resumes a pending code on web and via `ProviderDetailView` on native, and `ProviderSettingsView`/`readThemePalette` give the key chip and neutral badges real colors. Web verified in Chromium; iOS and Android unverified.
 
 ProviderDetailView consumes portable AccountSettings/ProviderSettingsView, native-only active sign-in slots and CatalogGrantsCard on Stremio Tracking. Existing Django/web adapter bodies coexist until full browser parity and migration acceptance; no platform classification is changed by these native composition edits.
+ProviderDetailView consumes portable AccountSettings/ProviderSettingsView, native-only active sign-in slots and CatalogGrantsCard on Stremio Tracking. MAL Import now uses the shared React import presentation on web and native; the Django provider fallback and central Import Data surface remain public-only. Browser: local Chromium comparison at 1280x1000 against main/latest exercised public and connected private modes and confirmed username input is absent in private mode. iOS and Android: runtime not verified; the native transport regression passes.
+
+MAL account authorization supports private imports while leaving new accounts' outgoing sync off. The Sync tab's explicit toggle controls writes, and reauthorization preserves the existing choice. Server/API and native transport tests pass; this focused branch did not reverify browser interaction for the auth/sync copy or actual iOS/Android rendering.
 
 ## CONNECTIONS
 
@@ -1063,6 +1066,8 @@ Status: `Web Migrated`
 - `frontend/ui/actionIcons.js`
 
 ## SET-SYNC
+
+MAL account authorization now grants private-import access without enabling outgoing sync for new connections. The Sync tab remains the explicit write gate; reauthorization preserves the user's choice. Server/API projection tests pass; browser interaction and actual iOS/Android runtime are unverified for this focused change.
 
 Status: `Partial / coexisting`
 

@@ -576,13 +576,13 @@
     {% if provider_tab != "activity" %}
       {% if provider_slug %}
         {% if not mal_account or not mal_account.is_connected %}
-          <p class="text-sm text-[var(--color-text-muted)]"><a class="text-[var(--color-link)] underline" href="{% url 'provider_detail' 'mal' %}?tab=connection">{% translate "Connect your MyAnimeList account to use outbound sync." %}</a></p>
+          <p class="text-sm text-[var(--color-text-muted)]"><a class="text-[var(--color-link)] underline" href="{% url 'provider_detail' 'mal' %}?tab=connection">{% translate "Connect your MyAnimeList account to import private lists. This does not enable outgoing sync." %}</a></p>
         {% endif %}
       {% else %}
       {% if not mal_account or not mal_account.is_connected %}
       {% if mal_sync_configured %}
         <p class="text-xs text-[var(--color-text-muted)] mb-3">
-          {% translate "Connect your MyAnimeList account to start syncing your watch status back." %}
+          {% translate "Connect your MyAnimeList account for private imports. Outgoing sync can be enabled separately here." %}
         </p>
         <form method="post" action="{% url 'mal_oauth' %}">
           {% csrf_token %}
@@ -591,10 +591,10 @@
         </form>
       {% else %}
         <p class="text-xs text-[var(--color-text-muted)]">
-          {% blocktranslate %}Add your own MyAnimeList Client ID and Client secret under{% endblocktranslate %}
+          {% blocktranslate %}Add a MyAnimeList Client ID and Client secret under{% endblocktranslate %}
           <a href="{% url 'provider_detail' 'mal' %}?tab=connection"
              class="text-[var(--color-link)] hover:underline">{% translate "Providers > MyAnimeList > Connection" %}</a>
-          {% translate "to enable syncing." %}
+          {% translate "to authorize your account." %}
         </p>
       {% endif %}
       {% endif %}

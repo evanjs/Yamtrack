@@ -436,11 +436,22 @@ def provider_detail(request, slug):
     if slug == "mal" and tab == "connection":
         account = context.get("mal_account")
         connected = bool(account and _flag(account.is_connected))
+        outgoing_sync = bool(account and _flag(account.sync_enabled))
         messages = {
-            "connected": _("Connected as %(name)s.") % {"name": (account.mal_username if account else "") or _("MyAnimeList user")},
+            "connected": _(
+                "Connected as %(name)s. Private list imports are available. "
+                "Outgoing sync is %(state)s."
+            ) % {
+                "name": (account.mal_username if account else "") or _("MyAnimeList user"),
+                "state": _("on") if outgoing_sync else _("off"),
+            },
             "attention": _("MyAnimeList authorization needs attention."),
-            "disconnected": _("This authorizes outgoing writes and enables automatic status, progress and score updates. Adding API credentials alone does not enable sync.")
-            if context.get("mal_sync_configured") else _("Add a MyAnimeList Client ID and Client secret to enable account authorization."),
+            "disconnected": _(
+                "Connect your MyAnimeList account to import private lists. "
+                "Outgoing sync stays off until you enable it on the Sync tab."
+            ) if context.get("mal_sync_configured") else _(
+                "Add a MyAnimeList Client ID and Client secret to enable account authorization."
+            ),
         }
         context["account_connection"] = provider_ui.account_connection(
             request, connected=connected, saved=bool(account), attention=bool(account and account.connection_broken),
@@ -449,7 +460,7 @@ def provider_detail(request, slug):
             summary={"url": "", "lastSync": "", "error": redact_secrets(account.last_error_message or "")} if account and account.connection_broken else None,
         )
         context["account_connection"]["title"] = _("MyAnimeList account")
-        context["account_connection"]["submitLabel"] = _("Authorize and enable MyAnimeList sync")
+        context["account_connection"]["submitLabel"] = _("Connect MyAnimeList account")
     if slug == "wetrakr" and tab == "connection":
         account = (context.get("wetrakr_sync") or {}).get("account")
         pending = bool(account and account.is_pending)

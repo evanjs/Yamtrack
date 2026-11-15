@@ -278,7 +278,8 @@ export function ProviderDetailView({
       {detail.importPreferences && onSavePreferences ? <ImportPreferencesCard model={importPreferencesModel(detail.importPreferences)}
         onSave={onSavePreferences} palette={palette} buttonPalette={buttonPalette} /> : null}
       <ProviderImportPanel slug={slug} connection={connection} schedules={schedules} hasFileImport={Boolean(detail.fileImport)}
-        defaults={detail.importPreferences?.values} palette={palette} buttonPalette={buttonPalette}
+        defaults={detail.importPreferences?.values} labels={detail.page.imports?.panelLabels}
+        palette={palette} buttonPalette={buttonPalette}
         onSync={onSync} onImport={onImport} onDeleteSchedule={onDeleteSchedule} />
       {detail.fileImport ? <FileImportCard model={detail.fileImport} copy={copy} onImportFile={onImportFile}
         pickFiles={pickFiles} onOpenUrl={onOpenUrl} onOpenActivity={onOpenActivity ? () => onOpenActivity('activity') : undefined}

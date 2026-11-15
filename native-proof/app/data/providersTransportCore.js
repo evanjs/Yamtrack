@@ -49,8 +49,8 @@ export function detailFromPayload(payload) {
   };
 }
 
-export function importBody({ username, mode, frequency, time }) {
-  const body = { user: String(username || '').trim() };
+export function importBody({ username, mode, frequency, time, private: privateImport }) {
+  const body = privateImport ? { private: true } : { user: String(username || '').trim() };
   if (mode) body.mode = mode;
   body.frequency = frequency || 'once';
   if (time) body.time = time;

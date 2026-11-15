@@ -812,15 +812,15 @@
       "verification": {
         "web": {
           "status": "unverified",
-          "evidence": "Plex, Seerr, KOReader and Hardcover compared between Django and Expo native-variant preview at 375x812. Native AccountSettings retains account context during sign-in; KOReader formContent fixes form-before-status order. Seerr invalid URL rejected and unchanged blank-key save succeeded; KOReader empty connect clicked without credentials. Final geometry/settled validation remains partial; existing web account adapters remain."
+          "evidence": "Plex, Seerr, KOReader and Hardcover compared between Django and Expo native-variant preview at 375x812. Native AccountSettings retains account context during sign-in; KOReader formContent fixes form-before-status order. Seerr invalid URL rejected and unchanged blank-key save succeeded; KOReader empty connect clicked without credentials. MAL connected-state copy now distinguishes private-import authorization from outgoing sync; server-render/API contract tests pass. Final geometry/settled validation remains partial; existing web account adapters remain."
         },
         "ios": {
           "status": "unverified",
-          "evidence": "Expo export --platform all compiled the shared account card through the native Settings provider slot; no simulator run was performed."
+          "evidence": "Expo export --platform all compiled the shared account card through the native Settings provider slot. The API contract test confirms private import availability remains true with outgoing sync off; no simulator runtime was performed."
         },
         "android": {
           "status": "unverified",
-          "evidence": "Expo export --platform all compiled the shared account card through the native Settings provider slot; no emulator run was performed."
+          "evidence": "Expo export --platform all compiled the shared account card through the native Settings provider slot. The API contract test confirms private import availability remains true with outgoing sync off; no emulator runtime was performed."
         }
       }
     },
@@ -2627,7 +2627,7 @@
       "verification": {
         "web": {
           "status": "unverified",
-          "evidence": "Shared headings/guide/account order now wrap native browser-account and KOReader form slots. Django and Expo provider pages compared at 375x812; native-only heading/order/frame fixes await final comparison. Existing web provider mount and Django body consumers remain; no full parity claim. Shared ProviderSettingsView and ProviderDetailView receive guidesSessionRequired from the provider adapter. Bearer responses omit credential-bearing webhook/install/configure guides and show password sign-in guidance; other connection forms, settings and browser/session defaults remain. Existing partial/coexisting ownership and full-parity retirement conditions remain. Transport/server regressions cover redaction; browser appearance and actual iOS/Android runtime for this state are not verified."
+          "evidence": "Shared headings/guide/account order now wrap native browser-account and KOReader form slots. Django and Expo provider pages compared at 375x812; native-only heading/order/frame fixes await final comparison. Existing web provider mount and Django body consumers remain; no full parity claim. Shared ProviderSettingsView and ProviderDetailView receive guidesSessionRequired from the provider adapter. Bearer responses omit credential-bearing webhook/install/configure guides and show password sign-in guidance. MAL account authorization now leaves outgoing sync off for new accounts while preserving the explicit Sync-tab toggle; server-render/API contract tests pass. Browser interaction and actual iOS/Android runtime for this state are not verified."
         },
         "ios": {
           "status": "unverified",
@@ -3519,7 +3519,7 @@
       "verification": {
         "web": {
           "status": "unverified",
-          "evidence": "Django and Expo Plex/Seerr/KOReader/Hardcover compared at 375x812. Native settings shell, account/guide order, Seerr intro, KOReader form nesting, frame/size and Stremio install consumer were corrected; final pairs pending. Seerr invalid URL and unchanged blank-key save exercised; no real provider credentials entered. Web body retirement still requires full parity. Shared ProviderSettingsView and ProviderDetailView receive guidesSessionRequired from the provider adapter. Bearer responses omit credential-bearing webhook/install/configure guides and show password sign-in guidance; other connection forms, settings and browser/session defaults remain. Existing partial/coexisting ownership and full-parity retirement conditions remain. Transport/server regressions cover redaction; browser appearance and actual iOS/Android runtime for this state are not verified."
+          "evidence": "Django and Expo Plex/Seerr/KOReader/Hardcover compared at 375x812. Native settings shell, account/guide order, Seerr intro, KOReader form nesting, frame/size and Stremio install consumer were corrected; final pairs pending. Seerr invalid URL rejected and unchanged blank-key save succeeded; no real provider credentials entered. Web body retirement still requires full parity. Shared ProviderSettingsView and ProviderDetailView receive guidesSessionRequired from the provider adapter. Bearer responses omit credential-bearing webhook/install/configure guides. MAL's shared account model now distinguishes private-import authorization from opt-in outgoing sync; server-render/API contract tests pass. Browser appearance and actual iOS/Android runtime for this state are not verified."
         },
         "ios": {
           "status": "unverified",
@@ -3560,15 +3560,15 @@
       "verification": {
         "web": {
           "status": "unverified",
-          "evidence": "Bundle compile and node/Django tests only. Not compared with the web page in a browser."
+          "evidence": "UI bundle and architecture checks pass, as do focused import/auth tests. Browser interaction for private import and sync opt-in was not reverified in this worktree."
         },
         "ios": {
           "status": "unverified",
-          "evidence": "Not verified."
+          "evidence": "Native transport tests pass; no Expo iOS runtime verification."
         },
         "android": {
           "status": "unverified",
-          "evidence": "Not verified."
+          "evidence": "Native transport tests pass; no Expo Android runtime verification."
         }
       }
     },
